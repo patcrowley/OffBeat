@@ -4,6 +4,20 @@ const path = require('path');
 const fs = require('fs');
 
 app.setName('Offbeat');
+
+// Portable build: keep settings, backups and the personal dictionary next to the .exe
+// (so it all travels on a USB stick). Falls back to the normal location if that folder is read-only.
+if (process.env.PORTABLE_EXECUTABLE_DIR) {
+  const dataDir = path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'Offbeat Data');
+  try {
+    fs.mkdirSync(dataDir, { recursive: true }); fs.accessSync(dataDir, fs.constants.W_OK);
+    app.setPath('userData', dataDir);
+    // browser caches stay on the PC's temp folder, not the stick
+    app.setPath('sessionData', path.join(app.getPath('temp'), 'Offbeat Portable Cache'));
+    app.setPath('crashDumps', path.join(app.getPath('temp'), 'Offbeat Portable Cache', 'Crashpad'));
+  }
+  catch (e) { /* not writable: use %APPDATA%\Offbeat */ }
+}
 const isMac = process.platform === 'darwin';
 
 /* ---------------- Preferences ---------------- */

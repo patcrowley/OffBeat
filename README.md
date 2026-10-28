@@ -8,8 +8,8 @@ Offbeat is an independent, from-scratch implementation (Electron + CodeMirror); 
 
 Download the latest version from the [Releases page](https://github.com/patcrowley/offbeat/releases):
 
-- **Offbeat Setup x.y.z.exe** installs Offbeat with a Start-menu entry and opens `.fountain` files on double-click.
-- **Offbeat-x.y.z-win.zip** is portable: unzip it anywhere and run `Offbeat.exe`.
+- **Offbeat-Setup-x.y.z.exe** installs Offbeat for your user account (no admin rights needed), adds Start-menu and desktop shortcuts, and opens `.fountain` files on double-click. Remove it from Settings → Apps.
+- **Offbeat-Portable-x.y.z.exe** runs without installing, from any folder or a USB stick. Its settings, backups and personal dictionary are kept in an `Offbeat Data` folder next to the exe, so they travel with it.
 
 The app isn't code-signed, so the first launch may show **Windows protected your PC**. Choose **More info → Run anyway**.
 
@@ -71,10 +71,10 @@ Requires [Node.js](https://nodejs.org) 20 or newer.
 npm install
 npm start          # run in development
 npm test           # parser/pagination/FDX unit tests
-npm run dist       # on Windows: builds dist\Offbeat Setup 1.0.2.exe and a zip
+npm run dist       # builds dist\Offbeat-Setup-<version>.exe and dist\Offbeat-Portable-<version>.exe
 ```
 
-`npm run dist` on Windows produces an NSIS installer that registers `.fountain` files. On Linux or macOS it can build the zip but the installer step needs Wine. Icon and version info are stamped into `Offbeat.exe` by `scripts/stamp-exe.js` on any OS.
+On Linux or macOS, building the Windows installer and portable exe needs Wine (with 32-bit support). Icon and version info are stamped into `Offbeat.exe` by `scripts/stamp-exe.js` on any OS.
 
 ## Project layout
 
@@ -94,7 +94,7 @@ test/                Unit tests and end-to-end app tests
 
 1. Update `version` in `package.json` and commit.
 2. Tag and push: `git tag v1.0.3 && git push origin main --tags`.
-3. GitHub Actions (`.github/workflows/release.yml`) builds the installer and zip on Windows and attaches them to a new release.
+3. GitHub Actions (`.github/workflows/release.yml`) builds the installer and portable exe on Windows and attaches them to a new release.
 
 ## Contributing
 

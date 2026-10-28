@@ -1,6 +1,6 @@
 {
   "name": "offbeat",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A Beat-style screenwriting app for Windows, using the Fountain format",
   "main": "main.js",
   "scripts": {
@@ -63,7 +63,7 @@
           ]
         },
         {
-          "target": "zip",
+          "target": "portable",
           "arch": [
             "x64"
           ]
@@ -77,10 +77,15 @@
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
       "createDesktopShortcut": true,
-      "shortcutName": "Offbeat"
+      "shortcutName": "Offbeat",
+      "artifactName": "Offbeat-Setup-${version}.exe",
+      "uninstallDisplayName": "Offbeat"
     },
     "afterPack": "scripts/stamp-exe.js",
-    "publish": null
+    "publish": null,
+    "portable": {
+      "artifactName": "Offbeat-Portable-${version}.exe"
+    }
   },
   "repository": {
     "type": "git",

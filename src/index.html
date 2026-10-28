@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' file:; img-src 'self' data:">
+<title>Offbeat</title>
+<link rel="stylesheet" href="../node_modules/codemirror/lib/codemirror.css">
+<link rel="stylesheet" href="../node_modules/codemirror/addon/dialog/dialog.css">
+<link rel="stylesheet" href="../node_modules/codemirror/addon/hint/show-hint.css">
+<link rel="stylesheet" href="styles.css">
+<style id="print-style"></style>
+</head>
+<body>
+<div id="app">
+  <header id="toolbar">
+    <div class="tb-group">
+      <button class="tb" data-cmd="toggle-outline" title="Outline (Ctrl+Shift+O)" aria-label="Outline">
+        <svg viewBox="0 0 20 20"><path d="M3 4h2M8 4h9M3 10h2M8 10h9M3 16h2M8 16h9"/></svg><span>Outline</span></button>
+      <button class="tb" data-cmd="toggle-cards" title="Index cards (Ctrl+Shift+K)" aria-label="Index cards">
+        <svg viewBox="0 0 20 20"><rect x="2.5" y="3.5" width="6.5" height="5.5" rx="1"/><rect x="11" y="3.5" width="6.5" height="5.5" rx="1"/><rect x="2.5" y="11" width="6.5" height="5.5" rx="1"/><rect x="11" y="11" width="6.5" height="5.5" rx="1"/></svg><span>Cards</span></button>
+      <button class="tb" data-cmd="toggle-timeline" title="Timeline (Ctrl+Shift+L)" aria-label="Timeline">
+        <svg viewBox="0 0 20 20"><path d="M2 10h16"/><rect x="3" y="7" width="4" height="6" rx="1"/><rect x="8.5" y="7" width="2.5" height="6" rx="1"/><rect x="12.5" y="7" width="5" height="6" rx="1"/></svg><span>Timeline</span></button>
+      <button class="tb" data-cmd="toggle-preview" title="Print preview (Ctrl+E)" aria-label="Preview">
+        <svg viewBox="0 0 20 20"><path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5M7.5 10h5M7.5 13h5"/></svg><span>Preview</span></button>
+      <button class="tb" data-cmd="stats" title="Statistics (Ctrl+Shift+I)" aria-label="Statistics">
+        <svg viewBox="0 0 20 20"><path d="M4 16V9M8.5 16V4M13 16v-5M17 16V7"/></svg><span>Stats</span></button>
+    </div>
+    <div id="doc-name" title="">Untitled</div>
+    <div class="tb-group right">
+      <button class="tb" data-cmd="title-page" title="Title page (Ctrl+Shift+T)" aria-label="Title page">
+        <svg viewBox="0 0 20 20"><path d="M5 2.5h10v15H5z"/><path d="M8 8h4M8.5 10.5h3"/></svg><span>Title page</span></button>
+      <button class="tb" data-action="export-pdf" title="Export PDF (Ctrl+Shift+E)" aria-label="Export PDF">
+        <svg viewBox="0 0 20 20"><path d="M10 3v9M6.5 8.5 10 12l3.5-3.5M4 14.5v2h12v-2"/></svg><span>PDF</span></button>
+    </div>
+  </header>
+
+  <main id="workspace">
+    <aside id="outline" class="panel">
+      <div class="outline-head">
+        <input id="outline-filter" type="search" placeholder="Filter scenes, characters, colors" spellcheck="false">
+      </div>
+      <ol id="outline-list"></ol>
+      <div id="outline-empty" class="empty-note" hidden>Scenes appear here as you write headings like <code>INT. KITCHEN - DAY</code>.</div>
+    </aside>
+
+    <section id="editor-wrap">
+      <div id="editor"></div>
+      <div id="cards" hidden>
+        <div class="cards-head">
+          <span>Drag cards to reorder scenes. Double-click a card to jump to it.</span>
+          <span class="cards-actions">
+            <button class="btn primary" data-cmd="new-card" title="New card (Ctrl+Shift+Enter)">New card</button>
+            <button class="btn" data-cmd="toggle-cards">Back to script</button>
+          </span>
+        </div>
+        <div id="cards-grid"></div>
+      </div>
+    </section>
+
+    <aside id="preview" class="panel" hidden>
+      <div class="preview-head">
+        <span id="preview-info">Preview</span>
+        <button class="btn" data-action="export-pdf">Export PDF</button>
+      </div>
+      <div id="preview-scroll"><div id="preview-pages" class="screenplay"></div></div>
+    </aside>
+  </main>
+
+  <div id="timeline" hidden><div id="timeline-track"></div></div>
+
+  <footer id="status">
+    <span id="st-scene"></span>
+    <span class="spacer"></span>
+    <span id="st-words"></span>
+    <span id="st-page"></span>
+    <span id="st-saved"></span>
+  </footer>
+</div>
+
+<div id="modal-backdrop" hidden>
+  <div id="modal" role="dialog" aria-modal="true"></div>
+</div>
+<div id="popover" hidden></div>
+<div id="toast" hidden></div>
+
+<script src="../node_modules/codemirror/lib/codemirror.js"></script>
+<script src="../node_modules/codemirror/addon/dialog/dialog.js"></script>
+<script src="../node_modules/codemirror/addon/search/searchcursor.js"></script>
+<script src="../node_modules/codemirror/addon/search/search.js"></script>
+<script src="../node_modules/codemirror/addon/hint/show-hint.js"></script>
+<script src="../node_modules/codemirror/addon/selection/active-line.js"></script>
+<script src="core/fountain.js"></script>
+<script src="core/paginate.js"></script>
+<script src="core/fdx.js"></script>
+<script src="samples.js"></script>
+<script src="mode.js"></script>
+<script src="app.js"></script>
+<script src="views.js"></script>
+<script src="spell.js"></script>
+</body>
+</html>

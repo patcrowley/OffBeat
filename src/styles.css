@@ -192,7 +192,9 @@ li.CodeMirror-hint-active { background: var(--rev-blue); color: #fff; }
 /* ---------- Index cards ---------- */
 #cards { position: absolute; inset: 0; overflow-y: auto; background: var(--desk); padding: 0 28px 48px; }
 .cards-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; padding: 14px 0; color: var(--muted); background: var(--desk); }
-#cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+#cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; padding-top: 12px; }
+/* the first act title already has its own space above it */
+#cards-grid > .c-section:first-child { margin-top: 0; }
 .c-section { grid-column: 1 / -1; margin-top: 14px; font-weight: 650; font-size: 15px; color: var(--section); }
 .card { position: relative; min-height: 150px; padding: 14px 14px 30px; background: var(--page); border-radius: 3px; box-shadow: 0 1px 2px var(--page-edge), 0 3px 10px -4px var(--page-edge);
   background-image: linear-gradient(transparent 33px, color-mix(in srgb, #d24b4b 40%, transparent) 33px, color-mix(in srgb, #d24b4b 40%, transparent) 34px, transparent 34px),

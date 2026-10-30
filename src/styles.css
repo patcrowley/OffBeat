@@ -207,8 +207,10 @@ li.CodeMirror-hint-active { background: var(--rev-blue); color: #fff; }
 .card .c-foot span:first-child { overflow: hidden; text-overflow: ellipsis; }
 .card .c-color { position: absolute; left: 0; right: 0; top: 0; height: 5px; border-radius: 3px 3px 0 0; }
 .card.current { outline: 2px solid var(--gold); }
-.card.selected { box-shadow: 0 0 0 3px var(--rev-blue), 0 3px 10px -4px var(--page-edge); }
-.card.selected::after { content: ''; position: absolute; inset: 0; border-radius: 3px; background: var(--rev-blue-soft); pointer-events: none; }
+/* Selection is only drawn when several cards are selected; a single click keeps the gold outline. */
+#cards-grid.multi .card.selected { box-shadow: 0 0 0 2px color-mix(in srgb, var(--rev-blue) 55%, transparent), 0 1px 2px var(--page-edge), 0 3px 10px -4px var(--page-edge); }
+#cards-grid.multi .card.selected::after { content: ''; position: absolute; top: -6px; left: -6px; width: 16px; height: 16px; border-radius: 50%; pointer-events: none;
+  background: var(--rev-blue) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M4.5 8.3l2.3 2.2 4.7-4.9' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / 14px no-repeat; box-shadow: 0 0 0 2px var(--desk); }
 .sel-bar { display: flex; align-items: center; gap: 8px; }
 .sel-count { color: var(--ink); font-weight: 600; margin-right: 4px; }
 #popover .pop-note { margin: 4px 10px 6px; color: var(--muted); font-size: 12px; max-width: 240px; }
@@ -232,8 +234,8 @@ li.CodeMirror-hint-active { background: var(--rev-blue); color: #fff; }
 .card-add .ca-plus { font-size: 28px; line-height: 1; font-weight: 300; }
 .card-add:hover, .card-add:focus-visible { border-color: var(--rev-blue); color: var(--rev-blue); background: var(--rev-blue-soft); }
 .card-add.drop-before { border-color: var(--rev-blue); background: var(--rev-blue-soft); }
-.card.just-added { animation: just-added 1.4s ease-out; }
-@keyframes just-added { 0%, 30% { box-shadow: 0 0 0 4px var(--gold); } 100% { box-shadow: 0 0 0 0 transparent; } }
+.card.just-added { animation: just-added 0.9s ease-out; }
+@keyframes just-added { 0% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--gold) 70%, transparent); } 100% { box-shadow: 0 0 0 2px transparent; } }
 .swatches { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 4px; }
 .swatch input { position: absolute; opacity: 0; pointer-events: none; }
 .swatch i { display: block; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); cursor: pointer; background: linear-gradient(135deg, transparent 45%, var(--faint) 45% 55%, transparent 55%), var(--page); }

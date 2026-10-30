@@ -138,6 +138,7 @@
     const focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#cards-grid .card');
     const focusLine = focused ? focused.dataset.line : null;
     grid.innerHTML = html;
+    grid.classList.toggle('multi', state.selected.size > 1);
     markCurrent();
     updateSelectionBar();
     if (focusLine != null) { const c = grid.querySelector(`.card[data-line="${focusLine}"]`); if (c) c.focus({ preventScroll: true }); }
@@ -360,6 +361,7 @@
       c.classList.toggle('selected', on);
       c.setAttribute('aria-selected', on);
     });
+    grid.classList.toggle('multi', state.selected.size > 1);
     updateSelectionBar();
   }
   function clearSelection() { state.selected = new Set(); state.anchor = null; paintSelection(); }

@@ -4,6 +4,8 @@ A Windows screenwriting app in the spirit of [Beat](https://github.com/lmparppei
 
 Offbeat is an independent, from-scratch implementation (Electron + CodeMirror); it is not affiliated with Beat or its author.
 
+![The Offbeat editor: a screenplay formatted on a true-to-scale page, with the scene outline in the sidebar](docs/screenshots/editor.png)
+
 ## Install (Windows 10/11, 64-bit)
 
 Download the latest version from the [Releases page](https://github.com/patcrowley/offbeat/releases):
@@ -30,11 +32,19 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 - **Reopens your last script** where you left off, with the same cursor position (Settings → Reopen Last Script on Startup)
 - **Autosave** (on by default, File → Autosave): saves a couple of seconds after you stop typing, when you switch to another app, and when you close, without asking. It works once a script has been saved to a file. Backups of saved versions are kept too (File → Show Backups Folder); autosaves add one at most every 10 minutes
 
+| Spell check review (F7) | 150% interface size with Atkinson Hyperlegible Mono |
+| --- | --- |
+| ![Reviewing a misspelled word with suggestions](docs/screenshots/spelling.png) | ![The editor at 150% interface size in a font designed for low vision](docs/screenshots/large-text.png) |
+
 **Structure**
 - Outline sidebar with sections, synopses, page numbers and a filter (by text, character, scene number or color)
 - Index cards — double-click a card to edit its heading and synopsis right there (Enter saves, Esc cancels), drag to reorder scenes, right-click to color, and add new cards at the end of any act or after the selected card. Select several cards with Ctrl+click, Shift+click or Ctrl+A, then right-click and choose **Move to act** to send them all to the end of another act, or drag any one of them to move the group. Selected cards can be recolored together, and Ctrl+Z undoes the whole move. Each card has a button to open that scene in the script
 - Timeline strip with scene lengths to scale
 - Scene colors use Beat's syntax: `INT. HOUSE - DAY [[COLOR RED]]`
+
+| Moving selected cards to another act | Editing a card in place |
+| --- | --- |
+| ![Two index cards selected, with the Move to act menu open](docs/screenshots/cards.png) | ![An index card being edited, with heading and synopsis fields](docs/screenshots/card-edit.png) |
 
 **Output**
 - Paginated print preview; PDF export with embedded Courier Prime; direct printing
@@ -44,6 +54,10 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 - Final Draft `.fdx` import and export (styles, scene numbers, dual dialogue, title page)
 - HTML export
 - Statistics: pages, scenes, words, rough runtime, INT/EXT and day/night split, dialogue per character, locations
+
+| Print preview and timeline, in dark mode | Statistics |
+| --- | --- |
+| ![Dark mode with the paginated print preview and the scene timeline](docs/screenshots/preview-dark.png) | ![The statistics window: pages, scenes, interior and exterior split, dialogue per character](docs/screenshots/statistics.png) |
 
 ## Keyboard shortcuts
 
@@ -80,6 +94,12 @@ npm run dist       # builds dist\Offbeat-Setup-<version>.exe and dist\Offbeat-Po
 ```
 
 On Linux or macOS, building the Windows installer and portable exe needs Wine (with 32-bit support). Icon and version info are stamped into `Offbeat.exe` by `scripts/stamp-exe.js` on any OS.
+
+Screenshots in this README come from the built-in sample screenplay and can be regenerated with:
+
+```
+OUT_DIR=docs/screenshots OFFBEAT_TEST=test/readme-shots.js npx electron .
+```
 
 ## Project layout
 

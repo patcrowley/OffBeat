@@ -106,6 +106,8 @@
   /* ---------- Index cards ---------- */
   function renderCards() {
     if (!state.cards || !App.parsed) return;
+    if (state.editing) { state.cardsStale = true; return; }   // don't wipe a card mid-edit
+    state.cardsStale = false;
     const lens = sceneLengths();
     const grid = $('cards-grid');
     let html = '';
@@ -122,22 +124,27 @@
         : it.notes.length ? `<div class="c-body">${esc(it.notes[0])}</div>`
         : `<div class="c-body snippet">${inline(it.snippet)}</div>`;
       const len = lens[it.line];
-      html += `<article class="card" draggable="true" data-line="${it.line}">
+      html += `<article class="card" draggable="true" tabindex="0" data-line="${it.line}" aria-label="Scene ${esc(it.number)}: ${esc(it.title)}">
         ${col ? `<i class="c-color" style="background:${col}"></i>` : ''}
-        <div class="c-top"><span class="c-num">${esc(it.number)}</span><span class="c-head" title="${esc(it.title)}">${esc(it.title)}</span></div>
+        <div class="c-top"><span class="c-num">${esc(it.number)}</span><span class="c-head" title="${esc(it.title)}">${esc(it.title)}</span>
+          <button class="c-go" title="Open this scene in the script" aria-label="Open scene ${esc(it.number)} in the script"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3H3.5v9.5H13V10M9 3h4v4M13 3 7.5 8.5"/></svg></button></div>
         ${body}
         <div class="c-foot"><span>${esc(it.characters.slice(0, 4).join(', '))}</span><span>${len ? fmtEighths(len.eighths) + ' pg' : ''}</span></div>
       </article>`;
     }
     html += addTile('data-end="1"', 'at the end of the script');
+    // keep keyboard focus on the same card across redraws
+    const focused = document.activeElement && document.activeElement.closest && document.activeElement.closest('#cards-grid .card');
+    const focusLine = focused ? focused.dataset.line : null;
     grid.innerHTML = html;
     markCurrent();
+    if (focusLine != null) { const c = grid.querySelector(`.card[data-line="${focusLine}"]`); if (c) c.focus({ preventScroll: true }); }
   }
 
   let dragLine = null;
   const grid = $('cards-grid');
   grid.addEventListener('dragstart', (e) => {
-    const c = e.target.closest('.card'); if (!c) return;
+    const c = e.target.closest('.card'); if (!c || c.classList.contains('editing')) { e.preventDefault(); return; }
     dragLine = +c.dataset.line; c.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', String(dragLine));
@@ -155,13 +162,149 @@
     const before = t.dataset.end ? null : t.dataset.before !== undefined ? +t.dataset.before : +t.dataset.line;
     moveScene(dragLine, before);
   });
-  grid.addEventListener('dblclick', (e) => { const c = e.target.closest('.card'); if (c) App.jumpTo(+c.dataset.line); });
+  /* ---------- Editing a card in place ---------- */
+  // Double-click (or Enter on a selected card) edits its heading and synopsis without leaving the cards.
+  grid.addEventListener('dblclick', (e) => {
+    const c = e.target.closest('.card'); if (!c || e.target.closest('.c-go') || c.classList.contains('editing')) return;
+    startEdit(c, e.target.closest('.c-body, .c-foot') ? 'synopsis' : 'heading');
+  });
+  grid.addEventListener('keydown', (e) => {
+    const c = e.target.closest('.card');
+    if (c && e.target === c && e.key === 'Enter') { e.preventDefault(); startEdit(c, 'heading'); }
+  });
+
+  function startEdit(card, focusField) {
+    if (state.editing) {
+      // save the card being edited first; the grid redraws, so find this card again by position
+      const idx = [...grid.querySelectorAll('.card')].indexOf(card);
+      commitEdit();
+      card = grid.querySelectorAll('.card')[idx];
+      if (!card) return;
+    }
+    const line = +card.dataset.line;
+    const p = App.ensureParsed();
+    const item = p.outline.find(o => o.type === 'scene' && o.line === line);
+    if (!item) return;
+    const head = p.lines[line].content;
+    const syn = item.synopsis.join('\n');
+    state.editing = { line, head, syn };
+    card.classList.add('editing');
+    card.draggable = false;
+    card.querySelector('.c-top').innerHTML = `<span class="c-num">${esc(item.number)}</span>
+      <input class="c-edit-head" value="${esc(head)}" spellcheck="false" autocomplete="off" aria-label="Scene heading">`;
+    const body = card.querySelector('.c-body');
+    const ta = document.createElement('textarea');
+    ta.className = 'c-edit-syn'; ta.value = syn; ta.rows = 4;
+    ta.placeholder = 'What happens in this scene';
+    ta.setAttribute('aria-label', 'Synopsis');
+    body.replaceWith(ta);
+    const foot = card.querySelector('.c-foot');
+    foot.innerHTML = '<span>Enter to save, Esc to cancel</span>';
+    foot.title = 'Shift+Enter starts a new line in the synopsis';
+    const field = focusField === 'synopsis' ? ta : card.querySelector('.c-edit-head');
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+  }
+
+  function endEdit(focusLine) {
+    state.editing = null;
+    renderCards();
+    const card = focusLine != null && grid.querySelector(`.card[data-line="${focusLine}"]`);
+    if (card) card.focus({ preventScroll: true });
+  }
+
+  function cancelEdit() { if (state.editing) endEdit(state.editing.line); }
+
+  function commitEdit() {
+    const ed = state.editing; if (!ed) return;
+    const card = grid.querySelector('.card.editing');
+    const newHead = card ? card.querySelector('.c-edit-head').value : ed.head;
+    const newSyn = card ? card.querySelector('.c-edit-syn').value : ed.syn;
+    state.editing = null;
+    const changed = applyCardEdit(ed.line, newHead, newSyn, ed);
+    if (!changed) endEdit(ed.line);
+    else { const c = grid.querySelector(`.card[data-line="${ed.line}"]`); if (c) c.focus({ preventScroll: true }); }
+  }
+  App.commitCardEdit = commitEdit;
+
+  grid.addEventListener('keydown', (e) => {
+    if (!e.target.matches('.c-edit-head, .c-edit-syn')) return;
+    e.stopPropagation();                       // keep Esc from closing the card view
+    if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+    else if (e.key === 'Enter' && !(e.shiftKey && e.target.matches('.c-edit-syn'))) { e.preventDefault(); commitEdit(); }
+  });
+  // Clicking anywhere outside the card saves it.
+  grid.addEventListener('focusout', (e) => {
+    if (!e.target.closest('.card.editing')) return;
+    const ed = state.editing;   // only save this edit, not one started by the click that moved focus
+    setTimeout(() => {
+      const card = grid.querySelector('.card.editing');
+      if (state.editing === ed && ed && !(card && card.contains(document.activeElement))) commitEdit();
+    }, 0);
+  });
+
+  /* Write a card's heading and synopsis back into the script as one undoable change. */
+  function applyCardEdit(line, newHead, newSyn, before) {
+    const p = App.ensureParsed();
+    const item = p.outline.find(o => o.type === 'scene' && o.line === line);
+    if (!item) return false;
+    let head = newHead.trim().replace(/\s+/g, ' ').toUpperCase();
+    const syn = newSyn.split('\n').map(x => x.trim()).filter(Boolean);
+    const headChanged = head && head !== before.head;
+    const synChanged = syn.join('\n') !== before.syn.split('\n').map(x => x.trim()).filter(Boolean).join('\n');
+    if (!headChanged && !synChanged) return false;
+
+    const raw = cm.getLine(line);
+    let headLine = raw;
+    if (headChanged) {
+      // keep a locked scene number and any notes such as [[COLOR RED]]
+      const num = raw.match(/#([\w.\-]+)#/);
+      const notes = raw.match(/\[\[[^\]]*\]\]/g) || [];
+      if (!F.HEADING_RE.test(head + ' ') && !head.startsWith('.')) head = '.' + head;
+      headLine = head + (num ? ` #${num[1]}#` : '') + (notes.length ? ' ' + notes.join(' ') : '');
+    }
+
+    const last = item.endLine;
+    const block = [];
+    for (let k = item.line; k <= last; k++) block.push(cm.getLine(k));
+    let out;
+    if (synChanged) {
+      // drop the old synopsis lines (and a blank line left doubled by their removal)
+      const kept = [];
+      for (let k = 1; k < block.length; k++) {
+        if (p.lines[item.line + k].type === 'synopsis') {
+          if (kept.length && kept[kept.length - 1].trim() === '' && (block[k + 1] || '').trim() === '') k++;
+          continue;
+        }
+        kept.push(block[k]);
+      }
+      let trailing = 0;
+      while (trailing < kept.length && kept[kept.length - 1 - trailing].trim() === '') trailing++;
+      const bodyLines = kept.slice(0, kept.length - trailing);
+      while (bodyLines.length && bodyLines[0].trim() === '') bodyLines.shift();
+      if (last < cm.lastLine() && trailing === 0) trailing = 1;
+      out = [headLine];
+      if (syn.length) out.push('', ...syn.map(s => '= ' + s));
+      if (bodyLines.length) out.push('', ...bodyLines);
+      for (let t = 0; t < trailing; t++) out.push('');
+    } else {
+      out = [headLine, ...block.slice(1)];
+    }
+    cm.replaceRange(out.join('\n'), { line: item.line, ch: 0 }, { line: last, ch: cm.getLine(last).length }, '+cardedit');
+    App.ensureParsed();
+    App.emit('parse', App.parsed);
+    toast('Card updated, Ctrl+Z to undo');
+    return true;
+  }
+  App.applyCardEdit = applyCardEdit;
   grid.addEventListener('click', (e) => {
+    const go = e.target.closest('.c-go');
+    if (go) { e.stopPropagation(); if (state.editing) commitEdit(); App.jumpTo(+go.closest('.card').dataset.line); return; }
     const add = e.target.closest('.card-add');
     if (add) { newCardDialog(add.dataset.end ? null : +add.dataset.before); return; }
   });
   $('cards').querySelector('.cards-head').addEventListener('click', (e) => { const b = e.target.closest('[data-cmd]'); if (b) window.cmd(b.dataset.cmd); });
-  grid.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (c) { cm.setCursor({ line: +c.dataset.line, ch: 0 }); state.current = App.currentScene(); markCurrent(); } });
+  grid.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (c && !c.classList.contains('editing')) { cm.setCursor({ line: +c.dataset.line, ch: 0 }); state.current = App.currentScene(); markCurrent(); } });
   grid.addEventListener('contextmenu', (e) => { const c = e.target.closest('.card'); if (!c) return; e.preventDefault(); colorMenu(e.clientX, e.clientY, +c.dataset.line); });
 
   /* Put a scene block before line `before` (or at the end when null) with exactly one
@@ -282,6 +425,7 @@
   App.newCardDialog = newCardDialog;
 
   App.toggleCards = function (force) {
+    if (state.editing) commitEdit();
     state.cards = force === undefined ? !state.cards : force;
     $('cards').hidden = !state.cards;
     cm.getWrapperElement().style.visibility = state.cards ? 'hidden' : '';
@@ -355,7 +499,15 @@
     if (e.key === 'Escape') {
       if (!$('modal-backdrop').hidden) { closeModal(); e.preventDefault(); }
       else if (!$('popover').hidden) $('popover').hidden = true;
+      else if (state.editing) cancelEdit();
       else if (state.cards) App.toggleCards(false);
+    }
+    // Undo/redo while the cards are showing (the script editor isn't focused there)
+    const mod = e.ctrlKey || e.metaKey;
+    if (state.cards && !state.editing && mod && $('modal-backdrop').hidden && !e.target.matches('input, textarea')) {
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); cm.undo(); App.ensureParsed(); App.emit('parse', App.parsed); }
+      else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); cm.redo(); App.ensureParsed(); App.emit('parse', App.parsed); }
     }
   });
   App.closeModal = closeModal;

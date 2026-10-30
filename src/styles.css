@@ -207,6 +207,17 @@ li.CodeMirror-hint-active { background: var(--rev-blue); color: #fff; }
 .card .c-foot span:first-child { overflow: hidden; text-overflow: ellipsis; }
 .card .c-color { position: absolute; left: 0; right: 0; top: 0; height: 5px; border-radius: 3px 3px 0 0; }
 .card.current { outline: 2px solid var(--gold); }
+.card:focus-visible { outline: 2px solid var(--rev-blue); outline-offset: 2px; }
+.card .c-go { flex: none; margin-left: auto; width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: 5px; background: none; color: var(--faint); cursor: pointer; opacity: 0; }
+.card .c-go svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.card:hover .c-go, .card:focus-within .c-go, .card .c-go:focus-visible { opacity: 1; }
+.card .c-go:hover { color: var(--rev-blue); background: var(--rev-blue-soft); }
+.card.editing { outline: 2px solid var(--rev-blue); cursor: auto; }
+.card.editing .c-top { height: 26px; }
+.c-edit-head { flex: 1; min-width: 0; height: 24px; padding: 0 4px; border: 1px solid var(--line); border-radius: 4px; background: var(--page); color: var(--ink); font: 700 12.5px var(--script); text-transform: uppercase; }
+.c-edit-syn { display: block; width: 100%; margin-top: 12px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; background: var(--page); color: var(--ink); font: 13px/20px var(--ui); resize: vertical; }
+.c-edit-head:focus, .c-edit-syn:focus { outline: none; border-color: var(--rev-blue); box-shadow: 0 0 0 2px var(--rev-blue-soft); }
+.card.editing .c-foot { color: var(--muted); }
 .card.dragging { opacity: 0.35; }
 .card.drop-before { box-shadow: -6px 0 0 -2px var(--rev-blue), 0 1px 2px var(--page-edge); }
 .cards-actions { display: flex; gap: 8px; }

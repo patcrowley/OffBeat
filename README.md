@@ -32,7 +32,7 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 
 **Structure**
 - Outline sidebar with sections, synopses, page numbers and a filter (by text, character, scene number or color)
-- Index cards — double-click a card to edit its heading and synopsis right there (Enter saves, Esc cancels), drag to reorder scenes, right-click to color, and add new cards at the end of any act or after the selected card. Each card has a button to open that scene in the script
+- Index cards — double-click a card to edit its heading and synopsis right there (Enter saves, Esc cancels), drag to reorder scenes, right-click to color, and add new cards at the end of any act or after the selected card. Select several cards with Ctrl+click, Shift+click or Ctrl+A, then use **Move to act** (or right-click) to send them all to the end of another act, or drag any one of them to move the group. Selected cards can be recolored together, and Ctrl+Z undoes the whole move. Each card has a button to open that scene in the script
 - Timeline strip with scene lengths to scale
 - Scene colors use Beat's syntax: `INT. HOUSE - DAY [[COLOR RED]]`
 

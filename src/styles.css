@@ -207,6 +207,13 @@ li.CodeMirror-hint-active { background: var(--rev-blue); color: #fff; }
 .card .c-foot span:first-child { overflow: hidden; text-overflow: ellipsis; }
 .card .c-color { position: absolute; left: 0; right: 0; top: 0; height: 5px; border-radius: 3px 3px 0 0; }
 .card.current { outline: 2px solid var(--gold); }
+.card.selected { box-shadow: 0 0 0 3px var(--rev-blue), 0 3px 10px -4px var(--page-edge); }
+.card.selected::after { content: ''; position: absolute; inset: 0; border-radius: 3px; background: var(--rev-blue-soft); pointer-events: none; }
+.sel-bar { display: flex; align-items: center; gap: 8px; }
+.sel-count { color: var(--ink); font-weight: 600; margin-right: 4px; }
+#popover .pop-note { margin: 4px 10px 6px; color: var(--muted); font-size: 12px; max-width: 240px; }
+#popover .pop-note code { font-family: var(--script); }
+#popover button.d2 { padding-left: 24px; } #popover button.d3 { padding-left: 38px; }
 .card:focus-visible { outline: 2px solid var(--rev-blue); outline-offset: 2px; }
 .card .c-go { flex: none; margin-left: auto; width: 22px; height: 22px; display: grid; place-items: center; border: 0; border-radius: 5px; background: none; color: var(--faint); cursor: pointer; opacity: 0; }
 .card .c-go svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }

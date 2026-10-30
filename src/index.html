@@ -47,7 +47,12 @@
       <div id="editor"></div>
       <div id="cards" hidden>
         <div class="cards-head">
-          <span>Drag cards to reorder scenes. Double-click a card to edit it.</span>
+          <span class="cards-hint">Drag cards to reorder scenes. Double-click a card to edit it. Ctrl+click or Shift+click to select several.</span>
+          <span class="sel-bar" hidden>
+            <span class="sel-count" aria-live="polite"></span>
+            <button class="btn primary" data-sel="move">Move to act</button>
+            <button class="btn" data-sel="clear">Clear selection</button>
+          </span>
           <span class="cards-actions">
             <button class="btn primary" data-cmd="new-card" title="New card (Ctrl+Shift+Enter)">New card</button>
             <button class="btn" data-cmd="toggle-cards">Back to script</button>
@@ -92,6 +97,7 @@
 <script src="core/fountain.js"></script>
 <script src="core/paginate.js"></script>
 <script src="core/fdx.js"></script>
+<script src="core/structure.js"></script>
 <script src="samples.js"></script>
 <script src="mode.js"></script>
 <script src="app.js"></script>

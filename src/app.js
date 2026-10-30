@@ -97,6 +97,9 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     pageTimer = setTimeout(() => App.paginate(), 700);
   }
 
+  // Forget cached scene-number and page-break markers so they're redrawn after big text changes.
+  App.resetMarks = function () { sceneSig = ''; gapSig = ''; };
+
   App.paginate = function () {
     App.ensureParsed();
     const gen = App.parseGen;

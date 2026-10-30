@@ -7,7 +7,7 @@
   const inline = (s) => F.parseInline(s || '').map(r => { let h = esc(r.text); if (r.u) h = `<u>${h}</u>`; if (r.i) h = `<i>${h}</i>`; if (r.b) h = `<b>${h}</b>`; return h; }).join('');
   const COLOR_LIST = ['red', 'orange', 'yellow', 'green', 'mint', 'cyan', 'blue', 'purple', 'magenta', 'pink', 'brown', 'gray'];
 
-  const state = { outline: true, cards: false, timeline: false, preview: false, filter: '', current: null };
+  const state = { outline: true, cards: false, timeline: false, preview: false, filter: '', current: null, selected: new Set(), anchor: null };
 
   /* ---------- scene lengths (in eighths of a page) from pagination ---------- */
   function sceneLengths() {
@@ -124,7 +124,8 @@
         : it.notes.length ? `<div class="c-body">${esc(it.notes[0])}</div>`
         : `<div class="c-body snippet">${inline(it.snippet)}</div>`;
       const len = lens[it.line];
-      html += `<article class="card" draggable="true" tabindex="0" data-line="${it.line}" aria-label="Scene ${esc(it.number)}: ${esc(it.title)}">
+      const sel = state.selected.has(it.line);
+      html += `<article class="card${sel ? ' selected' : ''}" draggable="true" tabindex="0" data-line="${it.line}" aria-selected="${sel}" aria-label="Scene ${esc(it.number)}: ${esc(it.title)}">
         ${col ? `<i class="c-color" style="background:${col}"></i>` : ''}
         <div class="c-top"><span class="c-num">${esc(it.number)}</span><span class="c-head" title="${esc(it.title)}">${esc(it.title)}</span>
           <button class="c-go" title="Open this scene in the script" aria-label="Open scene ${esc(it.number)} in the script"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3H3.5v9.5H13V10M9 3h4v4M13 3 7.5 8.5"/></svg></button></div>
@@ -138,18 +139,22 @@
     const focusLine = focused ? focused.dataset.line : null;
     grid.innerHTML = html;
     markCurrent();
+    updateSelectionBar();
     if (focusLine != null) { const c = grid.querySelector(`.card[data-line="${focusLine}"]`); if (c) c.focus({ preventScroll: true }); }
   }
 
-  let dragLine = null;
+  let dragLine = null, dragLines = null;
   const grid = $('cards-grid');
   grid.addEventListener('dragstart', (e) => {
     const c = e.target.closest('.card'); if (!c || c.classList.contains('editing')) { e.preventDefault(); return; }
     dragLine = +c.dataset.line; c.classList.add('dragging');
+    // dragging a selected card carries the whole selection along
+    dragLines = state.selected.has(dragLine) && state.selected.size > 1 ? [...state.selected] : [dragLine];
+    if (dragLines.length > 1) grid.querySelectorAll('.card.selected').forEach(x => x.classList.add('dragging'));
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', String(dragLine));
   });
-  grid.addEventListener('dragend', () => { dragLine = null; grid.querySelectorAll('.dragging,.drop-before').forEach(x => x.classList.remove('dragging', 'drop-before')); });
+  grid.addEventListener('dragend', () => { dragLine = null; dragLines = null; grid.querySelectorAll('.dragging,.drop-before').forEach(x => x.classList.remove('dragging', 'drop-before')); });
   grid.addEventListener('dragover', (e) => {
     const t = e.target.closest('.card, .card-add, .c-section'); if (!t || dragLine === null) return;
     e.preventDefault();
@@ -160,7 +165,7 @@
     const t = e.target.closest('.card, .card-add, .c-section'); if (!t || dragLine === null) return;
     e.preventDefault();
     const before = t.dataset.end ? null : t.dataset.before !== undefined ? +t.dataset.before : +t.dataset.line;
-    moveScene(dragLine, before);
+    moveScenes(dragLines || [dragLine], before);
   });
   /* ---------- Editing a card in place ---------- */
   // Double-click (or Enter on a selected card) edits its heading and synopsis without leaving the cards.
@@ -304,8 +309,34 @@
     if (add) { newCardDialog(add.dataset.end ? null : +add.dataset.before); return; }
   });
   $('cards').querySelector('.cards-head').addEventListener('click', (e) => { const b = e.target.closest('[data-cmd]'); if (b) window.cmd(b.dataset.cmd); });
-  grid.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (c && !c.classList.contains('editing')) { cm.setCursor({ line: +c.dataset.line, ch: 0 }); state.current = App.currentScene(); markCurrent(); } });
-  grid.addEventListener('contextmenu', (e) => { const c = e.target.closest('.card'); if (!c) return; e.preventDefault(); colorMenu(e.clientX, e.clientY, +c.dataset.line); });
+  grid.addEventListener('click', (e) => {
+    const c = e.target.closest('.card'); if (!c || c.classList.contains('editing')) return;
+    const line = +c.dataset.line;
+    if (e.ctrlKey || e.metaKey) {                       // add or remove one card
+      if (state.selected.has(line)) state.selected.delete(line); else state.selected.add(line);
+      state.anchor = line;
+    } else if (e.shiftKey && state.anchor != null) {    // select a run of cards
+      const cards = [...grid.querySelectorAll('.card')].map(x => +x.dataset.line);
+      const a = cards.indexOf(state.anchor), b = cards.indexOf(line);
+      if (a !== -1 && b !== -1) { state.selected = new Set(cards.slice(Math.min(a, b), Math.max(a, b) + 1)); }
+    } else {
+      state.selected = new Set([line]); state.anchor = line;
+    }
+    paintSelection();
+    cm.setCursor({ line, ch: 0 }); state.current = App.currentScene(); markCurrent();
+  });
+  // Clicking the empty desk clears the selection.
+  $('cards').addEventListener('click', (e) => {
+    if (e.target.closest('.card, .card-add, .cards-head, .c-section, #popover')) return;
+    if (state.selected.size) { clearSelection(); }
+  });
+  grid.addEventListener('contextmenu', (e) => {
+    const c = e.target.closest('.card'); if (!c) return;
+    e.preventDefault();
+    const line = +c.dataset.line;
+    if (!state.selected.has(line)) { state.selected = new Set([line]); state.anchor = line; paintSelection(); }
+    cardMenu(e.clientX, e.clientY, [...state.selected]);
+  });
 
   /* Put a scene block before line `before` (or at the end when null) with exactly one
      blank line above and below it, collapsing any run of blank lines at that spot.
@@ -322,30 +353,121 @@
     return prev >= 0 ? prev + 2 : 0;
   }
 
-  /* Move a scene's full text block before another item's line (or to the end). */
-  function moveScene(fromLine, beforeLine) {
-    const p = App.ensureParsed();
-    const item = p.outline.find(o => o.line === fromLine && o.type === 'scene');
-    if (!item || beforeLine === fromLine) return;
-    if (beforeLine !== null && beforeLine > item.line && beforeLine <= item.endLine + 1) return; // same spot
-    const lastLine = cm.lastLine();
-    const blockLines = [];
-    for (let k = item.line; k <= item.endLine; k++) blockLines.push(cm.getLine(k));
-    while (blockLines.length && blockLines[blockLines.length - 1].trim() === '') blockLines.pop();
-    const block = blockLines.join('\n');
-    const count = item.endLine - item.line + 1;
-    cm.operation(() => {
-      // remove
-      const delFrom = { line: item.line, ch: 0 };
-      const delTo = item.endLine >= lastLine ? { line: lastLine, ch: cm.getLine(lastLine).length } : { line: item.endLine + 1, ch: 0 };
-      cm.replaceRange('', delFrom, delTo, '+move');
-      const target = beforeLine === null ? null : beforeLine > item.endLine ? beforeLine - count : beforeLine;
-      placeBlock(block, target, '+move');
+  /* ---------- Selecting several cards and moving them together ---------- */
+  function paintSelection() {
+    grid.querySelectorAll('.card').forEach(c => {
+      const on = state.selected.has(+c.dataset.line);
+      c.classList.toggle('selected', on);
+      c.setAttribute('aria-selected', on);
     });
+    updateSelectionBar();
+  }
+  function clearSelection() { state.selected = new Set(); state.anchor = null; paintSelection(); }
+  App.clearCardSelection = clearSelection;
+  function updateSelectionBar() {
+    // forget selections that no longer point at a scene
+    const scenes = new Set((App.parsed ? App.parsed.outline : []).filter(o => o.type === 'scene').map(o => o.line));
+    for (const l of [...state.selected]) if (!scenes.has(l)) state.selected.delete(l);
+    const n = state.selected.size;
+    const bar = $('cards').querySelector('.sel-bar');
+    bar.hidden = n === 0;
+    $('cards').querySelector('.cards-hint').hidden = n > 0;
+    bar.querySelector('.sel-count').textContent = n === 1 ? '1 card selected' : `${n} cards selected`;
+  }
+  $('cards').querySelector('.sel-bar').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-sel]'); if (!b) return;
+    if (b.dataset.sel === 'clear') clearSelection();
+    else { const r = b.getBoundingClientRect(); moveMenu(r.left, r.bottom + 6, [...state.selected]); }
+  });
+  // Any edit other than our own move makes line-based selections stale.
+  cm.on('changes', (cm, changes) => {
+    if (state.selected.size && !changes.every(c => c.origin === '+move')) { state.selected = new Set(); state.anchor = null; }
+  });
+
+  function popoverAt(x, y, html, onClick) {
+    const pop = $('popover');
+    pop.innerHTML = html;
+    pop.hidden = false;
+    const r = pop.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + 'px';
+    pop.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + 'px';
+    pop.onclick = (e) => { const b = e.target.closest('button'); if (b) onClick(b); };
+    const first = pop.querySelector('button'); if (first) first.focus({ preventScroll: true });
+  }
+
+  function moveMenuHTML(count) {
+    const targets = Structure.sectionTargets(App.ensureParsed());
+    const what = count === 1 ? 'this card' : `${count} cards`;
+    if (!targets.length) {
+      return `<p class="pop-note">Add acts to the script with lines like <code># Act One</code>, then you can send cards to them.</p>
+        <button data-end="1">Move ${what} to the end of the script</button>`;
+    }
+    return `<p class="pop-note">Move ${what} to the end of</p>` +
+      targets.map(t => `<button data-before="${t.before === null ? '' : t.before}" class="d${Math.min(t.depth, 3)}">${esc(t.title)}</button>`).join('');
+  }
+  function moveMenu(x, y, lines) {
+    popoverAt(x, y, moveMenuHTML(lines.length), (b) => {
+      $('popover').hidden = true;
+      moveScenes(lines, b.dataset.end || b.dataset.before === '' ? null : +b.dataset.before);
+    });
+  }
+  function cardMenu(x, y, lines) {
+    const n = lines.length;
+    const html = (n > 1 ? `<p class="pop-note">${n} cards selected</p>` : '') +
+      `<button data-move="1">Move to act…</button><hr>` +
+      `<button data-c="none"><i class="sw"></i>No color</button>` +
+      COLOR_LIST.map(c => `<button data-c="${c}"><i class="sw" style="background:${F.colorValue(c)}"></i>${c[0].toUpperCase() + c.slice(1)}</button>`).join('') +
+      (n === 1 ? `<hr><button data-go="1">Go to scene</button>` : '');
+    popoverAt(x, y, html, (b) => {
+      if (b.dataset.move) { moveMenu(x, y, lines); return; }
+      $('popover').hidden = true;
+      if (b.dataset.go) App.jumpTo(lines[0]);
+      else if (b.dataset.c) {
+        const keep = new Set(state.selected), anchor = state.anchor;   // recoloring doesn't move any lines
+        cm.operation(() => lines.forEach(l => App.setSceneColor(l, b.dataset.c)));
+        state.selected = keep; state.anchor = anchor;
+        App.ensureParsed(); App.emit('parse', App.parsed);
+      }
+    });
+  }
+
+  /* Move scenes (by heading line) before another item's line, or to the end of the script. */
+  function moveScenes(lines, beforeLine) {
+    const r = Structure.moveScenes(cm.getValue(), lines, beforeLine == null ? null : beforeLine);
+    if (!r) return null;
+    applyText(r.text, '+move');
+    state.selected = new Set(r.lines);
+    state.anchor = r.lines[0];
     App.ensureParsed();
     App.emit('parse', App.parsed);
-    toast('Scene moved — Ctrl+Z to undo');
+    if (state.cards) {
+      const first = grid.querySelector(`.card[data-line="${r.lines[0]}"]`);
+      if (first) first.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      r.lines.forEach(l => { const c = grid.querySelector(`.card[data-line="${l}"]`); if (c) { c.classList.add('just-added'); setTimeout(() => c.classList.remove('just-added'), 1400); } });
+    }
+    toast(r.lines.length === 1 ? 'Scene moved, Ctrl+Z to undo' : `${r.lines.length} scenes moved, Ctrl+Z to undo`);
+    return r.lines;
   }
+  App.moveScenes = moveScenes;
+
+  /* Replace the script text with the fewest changed lines (one undo step). */
+  function applyText(newText, origin) {
+    const d = Structure.lineDiff(cm.getValue(), newText);
+    const last = cm.lastLine();
+    let from, to, ins;
+    if (d.from > last) { from = { line: last, ch: cm.getLine(last).length }; to = from; ins = '\n' + d.newLines.join('\n'); }
+    else if (d.suffix === 0) { from = { line: d.from, ch: 0 }; to = { line: last, ch: cm.getLine(last).length }; ins = d.newLines.join('\n'); }
+    else { from = { line: d.from, ch: 0 }; to = { line: d.oldEnd, ch: 0 }; ins = d.newLines.map(l => l + '\n').join(''); }
+    App.resetMarks();
+    cm.operation(() => {
+      cm.replaceRange(ins, from, to, origin);
+      // safety net: if the minimal update didn't land exactly, replace the whole text (still one undo step)
+      if (cm.getValue() !== newText) cm.replaceRange(newText, { line: 0, ch: 0 }, { line: cm.lastLine(), ch: cm.getLine(cm.lastLine()).length }, origin);
+    });
+  }
+
+  /* Move a single scene (drag and drop of one card). */
+  function moveScene(fromLine, beforeLine) { return moveScenes([fromLine], beforeLine); }
   App.moveScene = moveScene;
 
   /* ---------- New card ---------- */
@@ -500,7 +622,13 @@
       if (!$('modal-backdrop').hidden) { closeModal(); e.preventDefault(); }
       else if (!$('popover').hidden) $('popover').hidden = true;
       else if (state.editing) cancelEdit();
+      else if (state.cards && state.selected.size > 1) clearSelection();
       else if (state.cards) App.toggleCards(false);
+    }
+    if (state.cards && !state.editing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a' && $('modal-backdrop').hidden && !e.target.matches('input, textarea')) {
+      e.preventDefault();
+      const all = [...grid.querySelectorAll('.card')].map(c => +c.dataset.line);
+      state.selected = new Set(all); state.anchor = all[0]; paintSelection();
     }
     // Undo/redo while the cards are showing (the script editor isn't focused there)
     const mod = e.ctrlKey || e.metaKey;

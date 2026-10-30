@@ -122,4 +122,34 @@ t('big script performance', () => {
   const t0 = Date.now(); const p = F.parse(txt); const r = P.paginate(p);
   assert.ok(Date.now() - t0 < 500); assert.ok(r.pages.length > 100);
 });
+const S = require('../src/core/structure.js');
+const ACTS = 'Title: T\n\n# Act One\n\nINT. A - DAY\n\nAlpha.\n\nINT. B - DAY\n\n= syn b\n\nBravo.\n\nINT. C - DAY\n\nCharlie.\n\n# Act Two\n\n## Sequence\n\nINT. D - NIGHT\n\nDelta.\n\nINT. E - NIGHT\n\nEcho.\n';
+const order = (txt) => F.parse(txt).outline.map(o => (o.type === 'section' ? '#' : '') + o.title).join('|');
+const lineOf = (txt, t) => F.parse(txt).outline.find(o => o.title === t).line;
+t('move several scenes to another act', () => {
+  const tg = S.sectionTargets(F.parse(ACTS));
+  assert.deepStrictEqual(tg.map(x => [x.title, x.before]), [['Act One', lineOf(ACTS, 'Act Two')], ['Act Two', null], ['Sequence', null]]);
+  const r = S.moveScenes(ACTS, [lineOf(ACTS, 'INT. C - DAY'), lineOf(ACTS, 'INT. A - DAY')], tg[1].before);
+  assert.strictEqual(order(r.text), '#Act One|INT. B - DAY|#Act Two|#Sequence|INT. D - NIGHT|INT. E - NIGHT|INT. A - DAY|INT. C - DAY');
+  assert.ok(!/\n\n\n/.test(r.text) && r.text.endsWith('Charlie.\n'));
+  assert.deepStrictEqual(r.lines.map(l => r.text.split('\n')[l]), ['INT. A - DAY', 'INT. C - DAY']);
+  assert.ok(r.text.includes('INT. B - DAY\n\n= syn b\n\nBravo.\n\n# Act Two'));
+});
+t('move scenes back into an earlier act', () => {
+  const r = S.moveScenes(ACTS, [lineOf(ACTS, 'INT. D - NIGHT'), lineOf(ACTS, 'INT. E - NIGHT')], lineOf(ACTS, 'Act Two'));
+  assert.strictEqual(order(r.text), '#Act One|INT. A - DAY|INT. B - DAY|INT. C - DAY|INT. D - NIGHT|INT. E - NIGHT|#Act Two|#Sequence');
+  assert.ok(!/\n\n\n/.test(r.text));
+});
+t('moving to where scenes already are changes nothing', () => {
+  assert.strictEqual(S.moveScenes(ACTS, [lineOf(ACTS, 'INT. C - DAY')], lineOf(ACTS, 'Act Two')), null);
+  assert.strictEqual(S.moveScenes(ACTS, [lineOf(ACTS, 'INT. E - NIGHT')], null), null);
+});
+t('single scene drag before another', () => {
+  const r = S.moveScenes(ACTS, [lineOf(ACTS, 'INT. B - DAY')], lineOf(ACTS, 'INT. A - DAY'));
+  assert.strictEqual(order(r.text).split('|').slice(0, 4).join('|'), '#Act One|INT. B - DAY|INT. A - DAY|INT. C - DAY');
+});
+t('line diff', () => {
+  const d = S.lineDiff('a\nb\nc\nd', 'a\nx\ny\nd');
+  assert.deepStrictEqual([d.from, d.oldEnd, d.newLines], [1, 3, ['x', 'y']]);
+});
 console.log(`${passed} tests passed${process.exitCode ? ', with failures' : ''}`);

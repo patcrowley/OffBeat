@@ -35,8 +35,13 @@ const DEFAULT_PREFS = {
   zoom: 1,
   autosave: false,
   outlineVisible: true,
-  print: { paper: 'letter', sceneNumbers: true, boldHeadings: true, underlineHeadings: false, spaceBeforeHeading: 2 },
+  reopenLast: true,         // reopen the scripts that were open when Offbeat last closed
+  uiScale: 1,               // size of the whole interface (1 = 100%)
+  editorFont: 'courier-prime',
+  print: { paper: 'letter', sceneNumbers: true, boldHeadings: true, underlineHeadings: false, spaceBeforeHeading: 2, font: 'courier-prime' },
   recent: [],
+  session: [],              // scripts open at last quit
+  positions: {},            // path -> { line, ch, offset } so each script reopens where you left off
   bounds: null
 };
 let prefs = loadPrefs();
@@ -54,6 +59,7 @@ function setPref(key, value) {
   savePrefs();
   if (key === 'theme') nativeTheme.themeSource = value;
   if (key === 'spellLang') { Spell.reset(); }
+  if (key === 'uiScale') for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed() && docs.has(w.id)) applyScale(w);
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed() && docs.has(w.id)) w.webContents.send('prefs', prefs);
   buildMenu();
 }
@@ -62,6 +68,46 @@ function setPref(key, value) {
 const docs = new Map(); // window id -> { path, dirty, kind }
 const pendingReplies = new Map();
 let replyId = 0;
+
+/* Interface size: scales the whole window (menus excepted, which follow Windows' own scaling). */
+const UI_SCALES = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
+function applyScale(win) {
+  const z = UI_SCALES.includes(prefs.uiScale) ? prefs.uiScale : 1;
+  win.webContents.setZoomFactor(z);
+}
+function stepScale(dir) {
+  const i = UI_SCALES.indexOf(UI_SCALES.includes(prefs.uiScale) ? prefs.uiScale : 1);
+  const next = UI_SCALES[Math.max(0, Math.min(UI_SCALES.length - 1, i + dir))];
+  if (next !== prefs.uiScale) setPref('uiScale', next);
+}
+
+/* Remember where the cursor was in each script, and which scripts were open. */
+let quitting = false;
+function rememberPosition(d) {
+  if (!d || !d.path || !d.pos) return;
+  delete prefs.positions[d.path];
+  prefs.positions[d.path] = d.pos;
+  const keys = Object.keys(prefs.positions);
+  for (const k of keys.slice(0, Math.max(0, keys.length - 50))) delete prefs.positions[k];
+}
+function openPaths(exceptId) {
+  return BrowserWindow.getAllWindows()
+    .filter(w => !w.isDestroyed() && w.id !== exceptId && docs.has(w.id) && docs.get(w.id).path)
+    .map(w => docs.get(w.id).path);
+}
+app.on('before-quit', () => {
+  if (quitting) return;
+  quitting = true;
+  for (const d of docs.values()) rememberPosition(d);
+  const open = openPaths();
+  if (open.length) prefs.session = open;
+  savePrefs();
+});
+ipcMain.on('position', (e, pos) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const d = win && docs.get(win.id);
+  if (d && d.path) d.pos = pos;
+});
 
 function askRenderer(win, channel, payload) {
   return new Promise((resolve) => {
@@ -99,6 +145,7 @@ function createWindow(filePath, initialText) {
   win.once('ready-to-show', () => win.show());
 
   win.webContents.on('did-finish-load', () => {
+    applyScale(win);
     win.webContents.send('prefs', prefs);
     if (filePath) loadInto(win, filePath);
     else win.webContents.send('load', { text: initialText || '', path: null, name: 'Untitled' });
@@ -130,7 +177,19 @@ function createWindow(filePath, initialText) {
     d.closing = true;
     win.close();
   });
-  win.on('closed', () => docs.delete(win.id));
+  const winId = win.id;
+  win.on('closed', () => {
+    const d = docs.get(winId);
+    docs.delete(winId);
+    if (quitting || !d) return;
+    rememberPosition(d);
+    // Closing the last window ends the session: remember that script for next time.
+    const others = openPaths(winId);
+    if (others.length) prefs.session = others;
+    else if (d.path) prefs.session = [d.path];
+    else if (BrowserWindow.getAllWindows().length > 0) prefs.session = [];
+    savePrefs();
+  });
   const remember = () => { if (!win.isMaximized() && !win.isMinimized()) { prefs.bounds = win.getBounds(); savePrefs(); } };
   win.on('resized', remember);
   win.on('moved', remember);
@@ -160,8 +219,8 @@ async function loadInto(win, filePath) {
       win.webContents.send('import-fdx', { xml: text, name: path.basename(filePath, path.extname(filePath)) });
       d.path = null; d.dirty = true;
     } else {
-      d.path = filePath; d.dirty = false;
-      win.webContents.send('load', { text, path: filePath, name: path.basename(filePath) });
+      d.path = filePath; d.dirty = false; d.pos = null;
+      win.webContents.send('load', { text, path: filePath, name: path.basename(filePath), pos: prefs.positions[filePath] || null });
       addRecent(filePath);
     }
     updateTitle(win);
@@ -247,7 +306,8 @@ async function saveDoc(win, saveAs) {
 
 /* ---------------- Export / print ---------------- */
 async function renderInHiddenWindow(payload) {
-  const w = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, sandbox: true } });
+  // A separate session keeps the interface size (zoom) from leaking into printed pages.
+  const w = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, sandbox: true, partition: 'offbeat-print', zoomFactor: 1 } });
   await w.loadFile(path.join(__dirname, 'src', 'print.html'));
   await w.webContents.executeJavaScript(`(async () => {
     document.getElementById('style').textContent = ${JSON.stringify(payload.css)};
@@ -519,9 +579,23 @@ function buildMenu() {
         toggle('Show Page Breaks', 'showPageBreaks'),
         toggle('Typewriter Scrolling', 'typewriter'),
         { type: 'separator' },
-        ed('Zoom In', 'zoom-in', 'CmdOrCtrl+='),
-        ed('Zoom Out', 'zoom-out', 'CmdOrCtrl+-'),
-        ed('Actual Size', 'zoom-reset', 'CmdOrCtrl+0'),
+        { label: 'Interface Size', submenu: [
+          ...UI_SCALES.map(z => ({ label: Math.round(z * 100) + '%' + (z === 1 ? ' (default)' : ''), type: 'radio', checked: (UI_SCALES.includes(prefs.uiScale) ? prefs.uiScale : 1) === z, click: () => setPref('uiScale', z) })),
+          { type: 'separator' },
+          { label: 'Larger', accelerator: 'CmdOrCtrl+Shift+=', click: () => stepScale(1) },
+          { label: 'Smaller', accelerator: 'CmdOrCtrl+Shift+-', click: () => stepScale(-1) }
+        ] },
+        { label: 'Editor Font', submenu: [
+          radio('Courier Prime (default)', 'editorFont', 'courier-prime'),
+          radio('Courier New', 'editorFont', 'courier-new'),
+          radio('IBM Plex Mono', 'editorFont', 'plex'),
+          radio('Atkinson Hyperlegible Mono (for low vision)', 'editorFont', 'atkinson'),
+          radio('OpenDyslexic (for dyslexia)', 'editorFont', 'opendyslexic')
+        ] },
+        { type: 'separator' },
+        ed('Zoom Script In', 'zoom-in', 'CmdOrCtrl+='),
+        ed('Zoom Script Out', 'zoom-out', 'CmdOrCtrl+-'),
+        ed('Script Actual Size', 'zoom-reset', 'CmdOrCtrl+0'),
         { type: 'separator' },
         { role: 'togglefullscreen' },
         ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' }])
@@ -529,6 +603,8 @@ function buildMenu() {
     },
     {
       label: '&Settings', submenu: [
+        toggle('Reopen Last Script on Startup', 'reopenLast'),
+        { type: 'separator' },
         toggle('Smart Line Breaks', 'smartLineBreaks'),
         toggle('Auto-Capitalize Headings & Characters', 'autoCaps'),
         toggle('Autocomplete', 'autocomplete'),
@@ -536,6 +612,7 @@ function buildMenu() {
         { label: 'Open Personal Dictionary', click: () => openPersonalDictionary() },
         { type: 'separator' },
         { label: 'Paper Size', submenu: [radio('US Letter', 'print.paper', 'letter'), radio('A4', 'print.paper', 'a4')] },
+        { label: 'PDF and Print Font', submenu: [radio('Courier Prime (default)', 'print.font', 'courier-prime'), radio('Courier New', 'print.font', 'courier-new')] },
         toggle('Print Scene Numbers', 'print.sceneNumbers'),
         toggle('Bold Scene Headings', 'print.boldHeadings'),
         toggle('Underline Scene Headings', 'print.underlineHeadings'),
@@ -574,7 +651,16 @@ else {
     buildMenu();
     const files = [...fileArgs(process.argv), ...pendingOpen];
     if (files.length) files.forEach(f => createWindow(path.resolve(f)));
-    else createWindow();
+    else {
+      // Reopen the scripts from last time (skipping any that were moved or deleted).
+      let last = [];
+      if (prefs.reopenLast) {
+        last = (prefs.session || []).filter(p => { try { return fs.statSync(p).isFile(); } catch (e) { return false; } });
+        if (!last.length && prefs.recent[0] && fs.existsSync(prefs.recent[0])) last = [prefs.recent[0]];
+      }
+      if (last.length) last.forEach(p => createWindow(p));
+      else createWindow();
+    }
     // sample / help docs handled in renderer via 'command'
   });
   app.on('window-all-closed', () => { if (!isMac) app.quit(); });

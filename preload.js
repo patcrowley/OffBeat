@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('host', {
   autosave: () => ipcRenderer.invoke('autosave'),
   fontURL: () => ipcRenderer.invoke('font-url'),
   openTextDoc: (text) => ipcRenderer.send('open-text-doc', { text }),
+  sendPosition: (pos) => ipcRenderer.send('position', pos),
   spellCheck: (words) => ipcRenderer.invoke('spell-check', words),
   spellSuggest: (word) => ipcRenderer.invoke('spell-suggest', word),
   spellAdd: (word) => ipcRenderer.invoke('spell-add', word),

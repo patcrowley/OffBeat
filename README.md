@@ -24,7 +24,10 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 - Bold, italic, underline, notes, boneyard; force any element type
 - Find & replace, go-to-scene palette
 - Spell check that works offline (US or UK English): red underlines as you type, right-click for suggestions, and **F7** to review every flagged word with Change, Change all, Ignore all and Add to dictionary. Character names, contractions, emails, notes markup and omitted text are skipped. Your added words live in a personal dictionary (Settings → Open Personal Dictionary)
-- Light/dark mode (or follow Windows), dim markup, typewriter scrolling, zoom
+- Light/dark mode (or follow Windows), dim markup, typewriter scrolling, script zoom
+- **Interface size** (View → Interface Size, 75%–200%) makes everything bigger or smaller: menus, sidebar, dialogs and the script. In a narrow window the script keeps the size you chose and wraps lines a little earlier, instead of shrinking. PDFs and printouts are never affected
+- **Editor fonts** (View → Editor Font): Courier Prime, Courier New, IBM Plex Mono, Atkinson Hyperlegible Mono (designed for low vision) and OpenDyslexic (designed for dyslexia). This only changes how the script looks while you write
+- **Reopens your last script** where you left off, with the same cursor position (Settings → Reopen Last Script on Startup)
 - Backups of every saved version (File → Show Backups Folder) and optional autosave
 
 **Structure**
@@ -36,6 +39,7 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 **Output**
 - Paginated print preview; PDF export with embedded Courier Prime; direct printing
 - Proper pagination: 54 lines per page on Letter, (MORE)/(CONT'D) dialogue splits, headings never orphaned at a page bottom, US Letter or A4
+- PDF and print font: Courier Prime or Courier New (Settings → PDF and Print Font). Both are standard 12-point Courier, so page counts don't change
 - Title page editor
 - Final Draft `.fdx` import and export (styles, scene numbers, dual dialogue, title page)
 - HTML export
@@ -59,7 +63,8 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 | Force heading, action, character, transition, lyrics, centered | Ctrl+Alt+1 … 6 |
 | Dual dialogue | Ctrl+Shift+D |
 | Dim markup | Ctrl+Shift+M |
-| Zoom | Ctrl+= / Ctrl+- / Ctrl+0 |
+| Interface size larger / smaller | Ctrl+Shift+= / Ctrl+Shift+- |
+| Script zoom | Ctrl+= / Ctrl+- / Ctrl+0 |
 
 **Help → Fountain Syntax Guide** opens a cheat sheet written as a screenplay, and **Help → Open Sample Screenplay** shows every feature in use.
 

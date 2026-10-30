@@ -337,7 +337,12 @@
   }
 
   /* CSS shared by the preview pane and PDF export */
-  function printCSS(paperName, fontURL) {
+  const PRINT_FONTS = {
+    'courier-prime': "'Courier Prime', 'Courier New', Courier, monospace",
+    'courier-new': "'Courier New', 'Courier Prime', Courier, monospace"
+  };
+  function printCSS(paperName, fontURL, fontId) {
+    const family = PRINT_FONTS[fontId] || PRINT_FONTS['courier-prime'];
     const paper = PAPER[paperName] || PAPER.letter;
     return `
 ${fontURL ? `@font-face{font-family:'Courier Prime';font-weight:400;font-style:normal;src:url('${fontURL}/courier-prime-latin-400-normal.woff2') format('woff2');}
@@ -345,7 +350,7 @@ ${fontURL ? `@font-face{font-family:'Courier Prime';font-weight:400;font-style:n
 @font-face{font-family:'Courier Prime';font-weight:400;font-style:italic;src:url('${fontURL}/courier-prime-latin-400-italic.woff2') format('woff2');}
 @font-face{font-family:'Courier Prime';font-weight:700;font-style:italic;src:url('${fontURL}/courier-prime-latin-700-italic.woff2') format('woff2');}` : ''}
 @page { size: ${paper.width}in ${paper.height}in; margin: 0; }
-.screenplay { font-family: 'Courier Prime', 'Courier New', Courier, monospace; font-size: 12pt; color: #000; }
+.screenplay { font-family: ${family}; font-size: 12pt; color: #000; }
 .screenplay .page { position: relative; width: ${paper.width}in; height: ${paper.height}in; background: #fff; box-sizing: border-box; overflow: hidden; page-break-after: always; break-after: page; }
 .screenplay .page:last-child { page-break-after: auto; break-after: auto; }
 .screenplay .pbody { position: absolute; top: 1in; left: 1.5in; width: 6in; }
@@ -364,7 +369,7 @@ ${fontURL ? `@font-face{font-family:'Courier Prime';font-weight:400;font-style:n
 `;
   }
 
-  const api = { paginate, renderHTML, printCSS, pageMap, pageOfLine, PAPER, DEFAULTS, LAYOUT, wrapText };
+  const api = { PRINT_FONTS, paginate, renderHTML, printCSS, pageMap, pageOfLine, PAPER, DEFAULTS, LAYOUT, wrapText };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Paginator = api;
 })(typeof window !== 'undefined' ? window : globalThis);

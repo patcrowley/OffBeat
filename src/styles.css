@@ -4,6 +4,20 @@
 @font-face { font-family: 'Courier Prime'; font-weight: 400; font-style: italic; src: url('../node_modules/@fontsource/courier-prime/files/courier-prime-latin-400-italic.woff2') format('woff2'); }
 @font-face { font-family: 'Courier Prime'; font-weight: 700; font-style: italic; src: url('../node_modules/@fontsource/courier-prime/files/courier-prime-latin-700-italic.woff2') format('woff2'); }
 
+/* Editor font choices (View → Editor Font) */
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 400; font-style: normal; font-display: swap; src: url('../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 700; font-style: normal; font-display: swap; src: url('../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 400; font-style: italic; font-display: swap; src: url('../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-italic.woff2') format('woff2'); }
+@font-face { font-family: 'IBM Plex Mono'; font-weight: 700; font-style: italic; font-display: swap; src: url('../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-700-italic.woff2') format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible Mono'; font-weight: 400; font-style: normal; font-display: swap; src: url('../node_modules/@fontsource/atkinson-hyperlegible-mono/files/atkinson-hyperlegible-mono-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible Mono'; font-weight: 700; font-style: normal; font-display: swap; src: url('../node_modules/@fontsource/atkinson-hyperlegible-mono/files/atkinson-hyperlegible-mono-latin-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible Mono'; font-weight: 400; font-style: italic; font-display: swap; src: url('../node_modules/@fontsource/atkinson-hyperlegible-mono/files/atkinson-hyperlegible-mono-latin-400-italic.woff2') format('woff2'); }
+@font-face { font-family: 'Atkinson Hyperlegible Mono'; font-weight: 700; font-style: italic; font-display: swap; src: url('../node_modules/@fontsource/atkinson-hyperlegible-mono/files/atkinson-hyperlegible-mono-latin-700-italic.woff2') format('woff2'); }
+@font-face { font-family: 'OpenDyslexic'; font-weight: 400; font-style: normal; font-display: swap; src: url('../node_modules/@fontsource/opendyslexic/files/opendyslexic-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: 'OpenDyslexic'; font-weight: 700; font-style: normal; font-display: swap; src: url('../node_modules/@fontsource/opendyslexic/files/opendyslexic-latin-700-normal.woff2') format('woff2'); }
+@font-face { font-family: 'OpenDyslexic'; font-weight: 400; font-style: italic; font-display: swap; src: url('../node_modules/@fontsource/opendyslexic/files/opendyslexic-latin-400-italic.woff2') format('woff2'); }
+@font-face { font-family: 'OpenDyslexic'; font-weight: 700; font-style: italic; font-display: swap; src: url('../node_modules/@fontsource/opendyslexic/files/opendyslexic-latin-700-italic.woff2') format('woff2'); }
+
 /* ---------- Tokens ---------- */
 :root {
   --desk: #dde2e7;
@@ -121,9 +135,9 @@ button { font: inherit; color: inherit; }
 #editor .CodeMirror-activeline-background { background: transparent; }
 
 /* element layout: offsets/widths in characters from the text column */
-#editor pre.ln-character { padding-left: calc(var(--colL) + 22ch); text-transform: uppercase; }
-#editor pre.ln-parenthetical { padding-left: calc(var(--colL) + 16ch); padding-right: calc(var(--colR) + 24ch); }
-#editor pre.ln-dialogue { padding-left: calc(var(--colL) + 10ch); padding-right: calc(var(--colR) + 15ch); }
+#editor pre.ln-character { padding-left: calc(var(--colL) + 22 * var(--u, 1ch) * var(--k, 1)); text-transform: uppercase; }
+#editor pre.ln-parenthetical { padding-left: calc(var(--colL) + 16 * var(--u, 1ch) * var(--k, 1)); padding-right: calc(var(--colR) + 24 * var(--u, 1ch) * var(--k, 1)); }
+#editor pre.ln-dialogue { padding-left: calc(var(--colL) + 10 * var(--u, 1ch) * var(--k, 1)); padding-right: calc(var(--colR) + 15 * var(--u, 1ch) * var(--k, 1)); }
 #editor pre.ln-heading { font-weight: 700; text-transform: uppercase; }
 #editor pre.ln-transition { text-align: right; text-transform: uppercase; }
 #editor pre.ln-centered, #editor pre.ln-lyrics { text-align: center; }
@@ -137,7 +151,7 @@ button { font: inherit; color: inherit; }
 #editor pre.ln-title { color: var(--muted); }
 #editor pre.ln-title.tk { color: var(--ink); }
 #editor pre.ln-caps { text-transform: uppercase; }
-#editor pre.ln-dual::after { content: 'dual'; position: absolute; left: calc(var(--colL) - 7ch); top: 0.15em; font: 10px var(--ui); color: var(--faint); }
+#editor pre.ln-dual::after { content: 'dual'; position: absolute; left: calc(var(--colL) - 7 * var(--u, 1ch)); top: 0.15em; font: 10px var(--ui); color: var(--faint); }
 
 /* inline tokens */
 #editor .cm-strong { font-weight: 700; }
@@ -158,14 +172,14 @@ button { font: inherit; color: inherit; }
 #editor pre.scol-purple { --scol: #7b3fb5; } #editor pre.scol-gray, #editor pre.scol-grey { --scol: #7a7d87; } #editor pre.scol-teal { --scol: #0f8c7e; } #editor pre.scol-mint { --scol: #2f9e6b; }
 
 /* scene numbers hanging in the margins */
-.scene-num { position: absolute; top: 0; left: calc(var(--colL) - 7ch); width: 5ch; text-align: right; font-weight: 400; color: var(--muted); pointer-events: none; text-transform: none; }
-.scene-num.r { left: calc(var(--colL) + 62ch); text-align: left; }
+.scene-num { position: absolute; top: 0; left: calc(var(--colL) - 7 * var(--u, 1ch)); width: calc(5 * var(--u, 1ch)); text-align: right; font-weight: 400; color: var(--muted); pointer-events: none; text-transform: none; }
+.scene-num.r { left: calc(var(--colL) + var(--colW, 60ch) + 2 * var(--u, 1ch)); text-align: left; }
 
 /* page gaps between sheets */
 .page-gap { position: relative; height: 64px; margin: 0; pointer-events: none; background: var(--desk); }
 .page-gap::before { content: ''; position: absolute; left: var(--pageL); width: calc(var(--pageR) - var(--pageL)); top: 0; height: 18px; background: var(--page); box-shadow: 0 6px 6px -6px var(--page-edge); }
 .page-gap::after { content: ''; position: absolute; left: var(--pageL); width: calc(var(--pageR) - var(--pageL)); bottom: 0; height: 24px; background: var(--page); box-shadow: 0 -6px 6px -6px var(--page-edge); }
-.page-gap span { position: absolute; z-index: 1; bottom: 4px; left: calc(var(--colL) + 59ch); font-family: var(--script); color: var(--muted); }
+.page-gap span { position: absolute; z-index: 1; bottom: 4px; left: calc(var(--colL) + var(--colW, 60ch) - var(--u, 1ch)); font-family: var(--script); color: var(--muted); }
 .no-pagebreaks .page-gap { display: none; }
 
 /* autocomplete */

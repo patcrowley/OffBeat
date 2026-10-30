@@ -152,28 +152,51 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   }
 
   /* ---------------- Geometry: center a true-scale page ---------------- */
+  // Width of one "screenplay character". Equal to the glyph width for monospaced fonts; for
+  // proportional fonts (OpenDyslexic) it's the average over typical script text, so a line holds
+  // about as much as the printed 60-character line.
+  const unitProbe = document.createElement('span');
+  unitProbe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;left:-9999px;top:0';
+  cm.getWrapperElement().appendChild(unitProbe);
+  const SAMPLE = 'She grabs the keys and runs for the door. MAE (V.O.) We have to go, now! INT. KITCHEN - DAY';
+  function charUnit() {
+    unitProbe.textContent = 'iiiiiiiiii'; const narrow = unitProbe.getBoundingClientRect().width;
+    unitProbe.textContent = 'MMMMMMMMMM'; const wide = unitProbe.getBoundingClientRect().width;
+    if (Math.abs(narrow - wide) < 0.5) return cm.defaultCharWidth();
+    unitProbe.textContent = SAMPLE;
+    return unitProbe.getBoundingClientRect().width / SAMPLE.length;
+  }
+  App.charUnit = charUnit;
+
   App.layout = function () {
     const wrap = cm.getWrapperElement();
-    const W = cm.getScrollerElement().clientWidth - 2;
-    // shrink the type when the pane is narrower than a page so the format holds
+    // Width of the visible text area (the scroller also contains a hidden 50px strip used to hide native scrollbars).
+    const W = (cm.display.lineDiv.offsetWidth || (cm.getScrollerElement().clientWidth - 50)) - 2;
+    // In a narrow pane, shrink the type only slightly; after that keep the size the writer chose
+    // (interface size and script zoom) and wrap lines earlier instead.
     const ed = document.getElementById('editor');
     const curFit = parseFloat(ed.style.getPropertyValue('--fit')) || 1;
-    const baseCw = cm.defaultCharWidth() / curFit;
-    const fit = Math.max(0.55, Math.min(1, (W - 24) / (74 * baseCw)));
+    const baseCw = charUnit() / curFit;
+    const fit = Math.max(0.85, Math.min(1, (W - 24) / (74 * baseCw)));
     if (Math.abs(fit - curFit) > 0.01) { ed.style.setProperty('--fit', fit.toFixed(3)); cm.refresh(); }
-    const cw = cm.defaultCharWidth();
+    const cw = charUnit();
+    document.getElementById('editor').style.setProperty('--u', cw + 'px');
     const pageW = 85 * cw;
     const pageL = Math.max(12, Math.floor((W - pageW) / 2));
     let colL = pageL + 15 * cw;
     let colR = W - colL - 60 * cw;
     if (colR < 16) { colL = Math.max(16 + 7 * cw, colL + colR - 16); colR = 16; }
+    const colW = Math.max(20 * cw, W - colL - colR);
     const s = document.getElementById('editor').style;
+    s.setProperty('--colW', colW + 'px');
+    s.setProperty('--k', Math.min(1, colW / (60 * cw)).toFixed(4));
     s.setProperty('--colL', colL + 'px');
     s.setProperty('--colR', colR + 'px');
     s.setProperty('--pageL', pageL + 'px');
     s.setProperty('--pageR', Math.min(W, pageL + pageW) + 'px');
     void wrap;
     cm.refresh();
+    if (App.applyRestore) App.applyRestore();
   };
   let layoutRaf = 0;
   new ResizeObserver(() => { cancelAnimationFrame(layoutRaf); layoutRaf = requestAnimationFrame(() => App.layout()); }).observe(document.getElementById('editor'));
@@ -506,9 +529,37 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   const toast = window.toast;
 
   /* ---------------- Preferences ---------------- */
+  // Editor fonts. All but OpenDyslexic are monospaced, so the editor lines up like the printed page.
+  const EDITOR_FONTS = {
+    'courier-prime': "'Courier Prime', 'Courier New', Courier, monospace",
+    'courier-new': "'Courier New', 'Courier Prime', Courier, monospace",
+    'plex': "'IBM Plex Mono', 'Courier Prime', monospace",
+    'atkinson': "'Atkinson Hyperlegible Mono', 'Courier Prime', monospace",
+    'opendyslexic': "'OpenDyslexic', 'Courier Prime', sans-serif"
+  };
+  App.EDITOR_FONTS = EDITOR_FONTS;
+  let currentFont = null;
+  let fontReady = null;
+  function applyFont(id) { const p = loadFont(id); if (p) fontReady = p; return fontReady; }
+  async function loadFont(id) {
+    const family = EDITOR_FONTS[id] || EDITOR_FONTS['courier-prime'];
+    if (family === currentFont) return null;
+    currentFont = family;
+    document.documentElement.style.setProperty('--script', family);
+    const first = family.split(',')[0];
+    try { await Promise.all(['400', '700', 'italic 400'].map(w => document.fonts.load(`${w} 16px ${first}`))); } catch (e) { /* fall back silently */ }
+    if (family !== currentFont) return;
+    cm.refresh();   // drop the old font's cached character width
+    App.layout();   // then re-measure the page for the new font
+    sceneSig = ''; gapSig = '';
+    if (App.parsed) { updateSceneNumbers(); App._forcePaginate = true; App.paginate(); }
+    applyRestore();
+  }
+
   let prevPrint = '';
   function applyPrefs() {
     const p = App.prefs;
+    applyFont(p.editorFont);
     document.documentElement.style.setProperty('--zoom', p.zoom || 1);
     document.body.classList.toggle('dim-markup', !!p.dimMarkup);
     document.body.classList.toggle('no-pagebreaks', !p.showPageBreaks);
@@ -520,7 +571,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   }
 
   /* ---------------- Load / save ---------------- */
-  function setDocument(text, path, name) {
+  function setDocument(text, path, name, pos) {
     const s = F.splitSettings(text || '');
     App.settingsRaw = s.raw || null;
     let body = s.raw ? s.body.replace(/\s+$/, '\n') : s.body;
@@ -538,9 +589,47 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     updateSceneNumbers();
     App.paginate();
     cm.setCursor({ line: 0, ch: 0 });
+    if (pos && pos.line < cm.lineCount()) restorePosition(pos);
     cm.focus();
   }
   App.setDocument = setDocument;
+
+  /* Reopen each script where you left off: same cursor, same spot on screen. */
+  // Fonts and the interface size can still be settling when a script opens, which moves the
+  // text around, so the scroll is re-applied after each relayout for a moment (until the user acts).
+  let pendingRestore = null;
+  function applyRestore() {
+    if (!pendingRestore) return;
+    if (Date.now() > pendingRestore.until) { pendingRestore = null; return; }
+    const { line, offset } = pendingRestore;
+    const top = cm.charCoords({ line, ch: 0 }, 'local').top;
+    cm.scrollTo(null, Math.max(0, top - offset));
+  }
+  App.applyRestore = applyRestore;
+  function restorePosition(pos) {
+    const line = Math.min(pos.line, cm.lastLine());
+    cm.setCursor({ line, ch: Math.min(pos.ch || 0, cm.getLine(line).length) });
+    pendingRestore = { line, offset: pos.offset != null ? pos.offset : 120, until: Date.now() + 2500 };
+    requestAnimationFrame(applyRestore);
+    Promise.resolve(fontReady).then(() => requestAnimationFrame(() => requestAnimationFrame(applyRestore)));
+  }
+  const cancelRestore = () => { pendingRestore = null; };
+  cm.getWrapperElement().addEventListener('mousedown', cancelRestore, true);
+  cm.getWrapperElement().addEventListener('wheel', cancelRestore, { passive: true, capture: true });
+  cm.on('keydown', cancelRestore);
+  let posTimer = null;
+  function reportPosition() {
+    clearTimeout(posTimer);
+    posTimer = setTimeout(() => {
+      if (!App.path || !host.sendPosition) return;
+      const c = cm.getCursor();
+      const top = cm.charCoords({ line: c.line, ch: 0 }, 'local').top;
+      const offset = Math.round(top - cm.getScrollInfo().top);
+      host.sendPosition({ line: c.line, ch: c.ch, offset: Math.max(0, Math.min(offset, cm.getScrollInfo().clientHeight - 40)) });
+    }, 400);
+  }
+  cm.on('cursorActivity', reportPosition);
+  cm.on('scroll', reportPosition);
 
   App.getText = function () {
     let t = cm.getValue();
@@ -554,7 +643,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     return t ? F.plainInline(t.value.split('\n')[0]).replace(/[\\/:*?"<>|]/g, '').trim() || 'Untitled' : (App.name || 'Untitled').replace(/\.[^.]+$/, '');
   };
 
-  host.on('load', ({ text, path, name }) => setDocument(text, path, name));
+  host.on('load', ({ text, path, name, pos }) => setDocument(text, path, name, pos));
   host.on('import-fdx', ({ xml, name }) => {
     try {
       const text = FDX.fromFDX(xml);
@@ -580,7 +669,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     App.ensureParsed();
     const res = P.paginate(App.parsed, App.prefs.print);
     const fontURL = await host.fontURL();
-    host.reply(id, { html: P.renderHTML(App.parsed, res), css: P.printCSS(App.prefs.print.paper, fontURL), suggested: App.suggestedName() });
+    host.reply(id, { html: P.renderHTML(App.parsed, res), css: P.printCSS(App.prefs.print.paper, fontURL, App.prefs.print.font), suggested: App.suggestedName() });
   });
   host.on('request-export', ({ id, payload }) => {
     App.ensureParsed();
@@ -589,7 +678,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
       const res = P.paginate(App.parsed, App.prefs.print);
       const html = `<!doctype html><html><head><meta charset="utf-8"><title>${App.suggestedName()}</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&display=swap">
-<style>${P.printCSS(App.prefs.print.paper, null)} body{background:#e6e6e6;margin:0;padding:24px 0} .screenplay .page{margin:0 auto 24px;box-shadow:0 1px 4px rgba(0,0,0,.2)} @media print{body{background:#fff;padding:0}.screenplay .page{margin:0;box-shadow:none}}</style>
+<style>${P.printCSS(App.prefs.print.paper, null, App.prefs.print.font)} body{background:#e6e6e6;margin:0;padding:24px 0} .screenplay .page{margin:0 auto 24px;box-shadow:0 1px 4px rgba(0,0,0,.2)} @media print{body{background:#fff;padding:0}.screenplay .page{margin:0;box-shadow:none}}</style>
 </head><body><div class="screenplay">${P.renderHTML(App.parsed, res)}</div></body></html>`;
       host.reply(id, { content: html, suggested: App.suggestedName() });
     }

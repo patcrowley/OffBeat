@@ -1,6 +1,6 @@
 {
   "name": "offbeat",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "description": "A Beat-style screenwriting app for Windows, using the Fountain format",
   "main": "main.js",
   "scripts": {
@@ -12,7 +12,10 @@
   "author": "Pat Crowley",
   "license": "GPL-3.0-or-later",
   "dependencies": {
+    "@fontsource/atkinson-hyperlegible-mono": "^5.3.0",
     "@fontsource/courier-prime": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/opendyslexic": "^5.3.0",
     "codemirror": "^5.65.21",
     "dictionary-en": "^4.0.0",
     "dictionary-en-gb": "^3.0.0",
@@ -35,7 +38,12 @@
       "preload.js",
       "src/**/*",
       "build/icon.png",
-      "!**/*.map"
+      "!**/*.map",
+      "!node_modules/@fontsource/**/*.woff",
+      "!node_modules/@fontsource/**/*-{100,200,300,500,600,800}-*",
+      "!node_modules/@fontsource/**/*-{cyrillic,cyrillic-ext,greek,vietnamese}-*",
+      "!node_modules/@fontsource/**/*.css",
+      "!node_modules/@fontsource/**/*.{md,d.ts}"
     ],
     "directories": {
       "output": "dist",

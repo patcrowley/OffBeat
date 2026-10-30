@@ -316,10 +316,10 @@
     if (!state.preview || !App.paginated) return;
     if (!previewFontSet) {
       const fontURL = await (window.host ? window.host.fontURL() : Promise.resolve('../node_modules/@fontsource/courier-prime/files'));
-      $('print-style').textContent = P.printCSS(App.prefs.print.paper, fontURL).replace(/@page[^}]*}/, '');
-      previewFontSet = App.prefs.print.paper;
+      $('print-style').textContent = P.printCSS(App.prefs.print.paper, fontURL, App.prefs.print.font).replace(/@page[^}]*}/, '');
+      previewFontSet = App.prefs.print.paper + '|' + App.prefs.print.font;
     }
-    if (previewFontSet !== App.prefs.print.paper) { previewFontSet = false; return renderPreview(); }
+    if (previewFontSet !== App.prefs.print.paper + '|' + App.prefs.print.font) { previewFontSet = false; return renderPreview(); }
     const pages = $('preview-pages');
     pages.innerHTML = P.renderHTML(App.parsed, App.paginated);
     fitPreview();

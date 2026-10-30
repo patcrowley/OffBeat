@@ -1,6 +1,6 @@
 {
   "name": "offbeat",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "A Beat-style screenwriting app for Windows, using the Fountain format",
   "main": "main.js",
   "scripts": {

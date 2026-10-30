@@ -370,17 +370,7 @@
     // forget selections that no longer point at a scene
     const scenes = new Set((App.parsed ? App.parsed.outline : []).filter(o => o.type === 'scene').map(o => o.line));
     for (const l of [...state.selected]) if (!scenes.has(l)) state.selected.delete(l);
-    const n = state.selected.size;
-    const bar = $('cards').querySelector('.sel-bar');
-    bar.hidden = n === 0;
-    $('cards').querySelector('.cards-hint').hidden = n > 0;
-    bar.querySelector('.sel-count').textContent = n === 1 ? '1 card selected' : `${n} cards selected`;
   }
-  $('cards').querySelector('.sel-bar').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-sel]'); if (!b) return;
-    if (b.dataset.sel === 'clear') clearSelection();
-    else { const r = b.getBoundingClientRect(); moveMenu(r.left, r.bottom + 6, [...state.selected]); }
-  });
   // Any edit other than our own move makes line-based selections stale.
   cm.on('changes', (cm, changes) => {
     if (state.selected.size && !changes.every(c => c.origin === '+move')) { state.selected = new Set(); state.anchor = null; }

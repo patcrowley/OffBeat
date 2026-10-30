@@ -211,8 +211,6 @@ li.CodeMirror-hint-active { background: var(--rev-blue); color: #fff; }
 #cards-grid.multi .card.selected { box-shadow: 0 0 0 2px color-mix(in srgb, var(--rev-blue) 55%, transparent), 0 1px 2px var(--page-edge), 0 3px 10px -4px var(--page-edge); }
 #cards-grid.multi .card.selected::after { content: ''; position: absolute; top: -6px; left: -6px; width: 16px; height: 16px; border-radius: 50%; pointer-events: none;
   background: var(--rev-blue) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='M4.5 8.3l2.3 2.2 4.7-4.9' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>") center / 14px no-repeat; box-shadow: 0 0 0 2px var(--desk); }
-.sel-bar { display: flex; align-items: center; gap: 8px; }
-.sel-count { color: var(--ink); font-weight: 600; margin-right: 4px; }
 #popover .pop-note { margin: 4px 10px 6px; color: var(--muted); font-size: 12px; max-width: 240px; }
 #popover .pop-note code { font-family: var(--script); }
 #popover button.d2 { padding-left: 24px; } #popover button.d3 { padding-left: 38px; }

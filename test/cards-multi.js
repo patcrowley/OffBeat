@@ -12,7 +12,7 @@ module.exports = async ({ win }) => {
   const click = async (p, mods, button) => { wc.sendInputEvent({ type: 'mouseDown', x: p.x, y: p.y, button: button || 'left', clickCount: 1, modifiers: mods || [] }); wc.sendInputEvent({ type: 'mouseUp', x: p.x, y: p.y, button: button || 'left', clickCount: 1, modifiers: mods || [] }); await sleep(250); };
   const order = () => js(`App.ensureParsed().outline.map(o => (o.type === 'section' ? '#' : '') + o.title.replace(/^(INT|EXT)\\. THE ORPHEUM - /, '')).join(' | ')`);
   const selected = () => js(`[...document.querySelectorAll('.card.selected')].map(c => c.querySelector('.c-head').textContent.replace(/^(INT|EXT)\\. THE ORPHEUM - /, '')).join(' | ')`);
-  const bar = () => js(`document.querySelector('.sel-bar').hidden ? '' : document.querySelector('.sel-count').textContent`);
+  const bar = () => js(`(() => { const n = document.querySelectorAll('.card.selected').length; return n === 0 ? '' : n === 1 ? '1 card selected' : n + ' cards selected'; })()`);
   win.setSize(1440, 900); win.focus();
   await js(`App.setDocument(Samples.sample, null, 'x'); cmd('toggle-cards')`); await sleep(700);
   console.log('   start:', await order());
@@ -23,9 +23,10 @@ module.exports = async ({ win }) => {
   check('Ctrl+click selects several cards', (await selected()) === 'PROJECTION BOOTH - NIGHT | PROJECTION BOOTH - NIGHT' && (await bar()) === '2 cards selected', [await selected(), await bar()]);
   await shot('m1-selected.png');
 
-  // Move to act via the bar
-  const b = await pos(`document.querySelector('[data-sel=move]')`);
-  await click(b); await sleep(200);
+  check('the selection toolbar is gone', await js(`!document.querySelector('.sel-bar, [data-sel]')`));
+  // Move to act via right-click
+  await click(await pos(card(2)), [], 'right'); await sleep(150);
+  await click(await pos(`document.querySelector('#popover [data-move]')`)); await sleep(200);
   const items = await js(`[...document.querySelectorAll('#popover button')].map(b => b.textContent)`);
   check('move menu lists the acts', JSON.stringify(items) === JSON.stringify(['Act One', 'Act Two']), items);
   await shot('m2-menu.png');

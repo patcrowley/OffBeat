@@ -9,7 +9,7 @@ Offbeat is an independent, from-scratch implementation (Electron + CodeMirror); 
 Download the latest version from the [Releases page](https://github.com/patcrowley/offbeat/releases):
 
 - **Offbeat-Setup-x.y.z.exe** installs Offbeat for your user account (no admin rights needed), adds Start-menu and desktop shortcuts, and opens `.fountain` files on double-click. Remove it from Settings → Apps.
-- **Offbeat-Portable-x.y.z.exe** runs without installing, from any folder or a USB stick. Its settings, backups and personal dictionary are kept in an `Offbeat Data` folder next to the exe, so they travel with it.
+- **Offbeat-Portable-x.y.z.exe** runs without installing, from any folder or a USB stick. Its settings, backups and personal dictionary are kept in an `Offbeat Data` folder next to the exe, so they travel with it. The first time it runs on a PC that has the installed version, it starts from that version's settings.
 
 The app isn't code-signed, so the first launch may show **Windows protected your PC**. Choose **More info → Run anyway**.
 
@@ -28,7 +28,7 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 - **Interface size** (View → Interface Size, 75%–200%) makes everything bigger or smaller: menus, sidebar, dialogs and the script. In a narrow window the script keeps the size you chose and wraps lines a little earlier, instead of shrinking. PDFs and printouts are never affected
 - **Editor fonts** (View → Editor Font): Courier Prime, Courier New, IBM Plex Mono, Atkinson Hyperlegible Mono (designed for low vision) and OpenDyslexic (designed for dyslexia). This only changes how the script looks while you write
 - **Reopens your last script** where you left off, with the same cursor position (Settings → Reopen Last Script on Startup)
-- Backups of every saved version (File → Show Backups Folder) and optional autosave
+- **Autosave** (on by default, File → Autosave): saves a couple of seconds after you stop typing, when you switch to another app, and when you close, without asking. It works once a script has been saved to a file. Backups of saved versions are kept too (File → Show Backups Folder); autosaves add one at most every 10 minutes
 
 **Structure**
 - Outline sidebar with sections, synopses, page numbers and a filter (by text, character, scene number or color)

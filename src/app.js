@@ -559,9 +559,11 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     applyRestore();
   }
 
-  let prevPrint = '';
+  let prevPrint = '', prevAutosave = null;
   function applyPrefs() {
     const p = App.prefs;
+    if (p.autosave && prevAutosave === false) scheduleAutosave(500);   // just switched on: save what's waiting
+    prevAutosave = !!p.autosave;
     applyFont(p.editorFont);
     document.documentElement.style.setProperty('--zoom', p.zoom || 1);
     document.body.classList.toggle('dim-markup', !!p.dimMarkup);
@@ -655,17 +657,22 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
       toast('Imported from Final Draft — save to keep it as Fountain');
     } catch (e) { toast('Could not import this Final Draft file'); console.error(e); }
   });
-  host.on('saved', ({ path, name }) => {
+  host.on('saved', ({ path, name, auto }) => {
     App.path = path; App.name = name;
     document.getElementById('doc-name').textContent = name;
     document.getElementById('doc-name').title = path;
-    App.cleanGen = cm.changeGeneration(true);
-    lastDirty = true; updateDirty();
-    document.getElementById('st-saved').textContent = 'Saved';
+    // Clean as of the text that was written; anything typed during the save stays unsaved.
+    App.cleanGen = savedGen != null ? savedGen : cm.changeGeneration(true);
+    savedGen = null;
+    lastDirty = undefined; updateDirty();   // always re-report, so the window knows about later edits
+    const st = document.getElementById('st-saved');
+    if (cm.isClean(App.cleanGen)) st.textContent = auto ? 'Autosaved' : 'Saved';
+    else scheduleAutosave(1500);
   });
   host.on('prefs', (p) => { App.prefs = p; applyPrefs(); });
   host.on('command', (c) => cmd(c));
-  host.on('request-text', ({ id }) => host.reply(id, App.getText()));
+  let savedGen = null;
+  host.on('request-text', ({ id }) => { savedGen = cm.changeGeneration(true); host.reply(id, App.getText()); });
   host.on('request-is-empty', ({ id }) => host.reply(id, cm.getValue().trim() === '' && cm.isClean(App.cleanGen)));
   host.on('request-suggested-name', ({ id }) => host.reply(id, App.suggestedName()));
   host.on('request-print-html', async ({ id }) => {
@@ -687,8 +694,16 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     }
   });
 
-  // Autosave every minute when enabled
-  setInterval(() => { if (App.prefs && App.prefs.autosave && App.path) host.autosave(); }, 60000);
+  // Autosave: shortly after you stop typing, when you switch to another app, and every 30 s as a safety net.
+  let autoTimer = null;
+  function scheduleAutosave(delay) {
+    clearTimeout(autoTimer);
+    if (!App.prefs || !App.prefs.autosave || !App.path) return;
+    autoTimer = setTimeout(() => { if (!cm.isClean(App.cleanGen)) host.autosave(); }, delay);
+  }
+  cm.on('changes', () => scheduleAutosave(2500));
+  window.addEventListener('blur', () => scheduleAutosave(0));
+  setInterval(() => scheduleAutosave(0), 30000);
 
   // Toolbar
   document.getElementById('toolbar').addEventListener('click', (e) => {

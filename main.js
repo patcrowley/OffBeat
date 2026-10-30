@@ -11,6 +11,11 @@ if (process.env.PORTABLE_EXECUTABLE_DIR) {
   const dataDir = path.join(process.env.PORTABLE_EXECUTABLE_DIR, 'Offbeat Data');
   try {
     fs.mkdirSync(dataDir, { recursive: true }); fs.accessSync(dataDir, fs.constants.W_OK);
+    // First run of the portable version: start from the installed version's settings and word list.
+    const installed = app.getPath('userData');
+    for (const f of ['prefs.json', 'dictionary.txt']) {
+      try { if (!fs.existsSync(path.join(dataDir, f)) && fs.existsSync(path.join(installed, f))) fs.copyFileSync(path.join(installed, f), path.join(dataDir, f)); } catch (e) { /* ignore */ }
+    }
     app.setPath('userData', dataDir);
     // browser caches stay on the PC's temp folder, not the stick
     app.setPath('sessionData', path.join(app.getPath('temp'), 'Offbeat Portable Cache'));
@@ -33,7 +38,7 @@ const DEFAULT_PREFS = {
   spellLang: 'en-US',
   typewriter: false,
   zoom: 1,
-  autosave: false,
+  autosave: true,           // save a moment after you stop typing (only scripts that have a file)
   outlineVisible: true,
   reopenLast: true,         // reopen the scripts that were open when Offbeat last closed
   uiScale: 1,               // size of the whole interface (1 = 100%)
@@ -164,6 +169,8 @@ function createWindow(filePath, initialText) {
     const d = docs.get(win.id);
     if (!d || !d.dirty || d.closing) return;
     e.preventDefault();
+    // With autosave on, a script that has a file is simply saved on the way out.
+    if (prefs.autosave && d.path && await saveDoc(win, false, { auto: true })) { d.closing = true; win.close(); return; }
     const r = await dialog.showMessageBox(win, {
       type: 'warning', buttons: ['Save', "Don't Save", 'Cancel'], defaultId: 0, cancelId: 2,
       message: `Do you want to save the changes you made to ${d.path ? path.basename(d.path) : 'Untitled'}?`,
@@ -205,6 +212,7 @@ function updateTitle(win) {
 }
 
 function addRecent(p) {
+  if (prefs.recent[0] === p) return;   // already first: nothing to update (keeps open menus from closing on autosave)
   prefs.recent = [p, ...prefs.recent.filter(x => x !== p)].slice(0, 12);
   savePrefs();
   try { app.addRecentDocument(p); } catch (e) { /* ignore */ }
@@ -261,9 +269,12 @@ async function openDialog() {
   if (!r.canceled) for (const p of r.filePaths) await openFile(p);
 }
 
-function backup(filePath) {
+const lastBackup = new Map();
+function backup(filePath, auto) {
   try {
     if (!fs.existsSync(filePath)) return;
+    if (auto && Date.now() - (lastBackup.get(filePath) || 0) < 10 * 60 * 1000) return;
+    lastBackup.set(filePath, Date.now());
     const dir = path.join(app.getPath('userData'), 'Backups', path.basename(filePath, path.extname(filePath)));
     fs.mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -273,7 +284,8 @@ function backup(filePath) {
   } catch (e) { /* ignore */ }
 }
 
-async function saveDoc(win, saveAs) {
+async function saveDoc(win, saveAs, opts) {
+  const auto = !!(opts && opts.auto);
   const d = docs.get(win.id);
   if (!d) return false;
   let target = d.path;
@@ -289,14 +301,14 @@ async function saveDoc(win, saveAs) {
   const text = await askRenderer(win, 'request-text');
   if (text === null) { dialog.showErrorBox('Save failed', 'Could not read the document.'); return false; }
   try {
-    backup(target);
+    backup(target, auto);
     const tmp = target + '.offbeat-tmp';
     fs.writeFileSync(tmp, text, 'utf8');
     fs.renameSync(tmp, target);
     d.path = target; d.dirty = false;
     updateTitle(win);
     addRecent(target);
-    win.webContents.send('saved', { path: target, name: path.basename(target) });
+    win.webContents.send('saved', { path: target, name: path.basename(target), auto });
     return true;
   } catch (err) {
     dialog.showErrorBox('Save failed', String(err.message || err));
@@ -379,7 +391,7 @@ ipcMain.on('menu-action', (e, action) => {
 ipcMain.handle('autosave', async (e) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   const d = win && docs.get(win.id);
-  if (d && d.path && d.dirty) return saveDoc(win, false);
+  if (d && d.path && d.dirty) return saveDoc(win, false, { auto: true });
   return false;
 });
 /* ---------------- Spelling ---------------- */

@@ -68,4 +68,19 @@ module.exports = async ({ win }) => {
   await js(`App.jumpTo(20)`); await sleep(800);
   await shot('large-text.png');
   await js(`host.setPref('uiScale', 1); host.setPref('editorFont', 'courier-prime')`); await sleep(500);
+
+  // 8. Beat's revisions, review notes and tags
+  await js(`App.setDocument(Samples.sample, null, 'The Last Reel.fountain')`); await sleep(800); await ignoreNames();
+  const sel = (t, n) => js(`(() => { const d = App.cm.getDoc(); let i = -1; for (let k = 0; k <= ${n || 0}; k++) i = d.getValue().indexOf(${JSON.stringify(t)}, i + 1); d.setSelection(d.posFromIndex(i), d.posFromIndex(i + ${t.length})); })()`);
+  await sel('hands that have threaded ten thousand reels'); await js(`cmd('rev-gen:0'); cmd('mark-revised')`);
+  await sel('like old dogs asleep on a porch'); await js(`cmd('rev-gen:1'); cmd('mark-revised')`);
+  await sel('Two 35mm projectors'); await js(`cmd('tag:prop')`);
+  await sel('a box of popcorn'); await js(`cmd('tag:prop')`);
+  await sel('Changeover in ninety seconds.'); await js(`cmd('add-review')`); await sleep(300);
+  await js(`document.getElementById('rv-text').value = 'Could she say this without looking at the clock? Shows how well she knows the job.'; document.querySelector('[data-x=save]').click()`); await sleep(300);
+  await js(`cmd('revision-mode')`); await sleep(2400);   // let the toast fade
+  await js(`App.cm.setCursor({line: 18, ch: 0}); App.cm.scrollTo(null, App.cm.charCoords({line: 9, ch: 0}, 'local').top - 60)`); await sleep(500);
+  await click(await pos(`document.querySelector('#editor .bt-review')`)); await sleep(300);
+  await shot('revisions.png');
+  await js(`cmd('revision-mode')`); await reset();
 };

@@ -296,7 +296,10 @@
     } else {
       out = [headLine, ...block.slice(1)];
     }
-    cm.replaceRange(out.join('\n'), { line: item.line, ch: 0 }, { line: last, ch: cm.getLine(last).length }, '+cardedit');
+    const oldAll = cm.getValue().split('\n');
+    const newAll = oldAll.slice(0, item.line).concat(out, oldAll.slice(last + 1));
+    const run = () => cm.replaceRange(out.join('\n'), { line: item.line, ch: 0 }, { line: last, ch: cm.getLine(last).length }, '+cardedit');
+    if (App.keepMarks) App.keepMarks(oldAll, newAll, null, run); else run();
     App.ensureParsed();
     App.emit('parse', App.parsed);
     toast('Card updated, Ctrl+Z to undo');
@@ -427,7 +430,7 @@
   function moveScenes(lines, beforeLine) {
     const r = Structure.moveScenes(cm.getValue(), lines, beforeLine == null ? null : beforeLine);
     if (!r) return null;
-    applyText(r.text, '+move');
+    applyText(r.text, '+move', r.origin);
     state.selected = new Set(r.lines);
     state.anchor = r.lines[0];
     App.ensureParsed();
@@ -442,20 +445,25 @@
   }
   App.moveScenes = moveScenes;
 
-  /* Replace the script text with the fewest changed lines (one undo step). */
-  function applyText(newText, origin) {
-    const d = Structure.lineDiff(cm.getValue(), newText);
+  /* Replace the script text with the fewest changed lines (one undo step).
+     `origin` (optional): for each new line, the old line it came from — keeps revision marks,
+     review notes and tags on lines that only moved. */
+  function applyText(newText, origin, lineOrigin) {
+    const oldText = cm.getValue();
+    const d = Structure.lineDiff(oldText, newText);
     const last = cm.lastLine();
     let from, to, ins;
     if (d.from > last) { from = { line: last, ch: cm.getLine(last).length }; to = from; ins = '\n' + d.newLines.join('\n'); }
     else if (d.suffix === 0) { from = { line: d.from, ch: 0 }; to = { line: last, ch: cm.getLine(last).length }; ins = d.newLines.join('\n'); }
     else { from = { line: d.from, ch: 0 }; to = { line: d.oldEnd, ch: 0 }; ins = d.newLines.map(l => l + '\n').join(''); }
     App.resetMarks();
-    cm.operation(() => {
+    const run = () => cm.operation(() => {
       cm.replaceRange(ins, from, to, origin);
       // safety net: if the minimal update didn't land exactly, replace the whole text (still one undo step)
       if (cm.getValue() !== newText) cm.replaceRange(newText, { line: 0, ch: 0 }, { line: cm.lastLine(), ch: cm.getLine(cm.lastLine()).length }, origin);
     });
+    if (App.keepMarks) App.keepMarks(oldText.split('\n'), newText.split('\n'), lineOrigin || null, run);
+    else run();
   }
 
   /* Move a single scene (drag and drop of one card). */
@@ -574,19 +582,21 @@
     if (!state.preview || !App.paginated) return;
     if (!previewFontSet) {
       const fontURL = await (window.host ? window.host.fontURL() : Promise.resolve('../node_modules/@fontsource/courier-prime/files'));
-      $('print-style').textContent = P.printCSS(App.prefs.print.paper, fontURL, App.prefs.print.font).replace(/@page[^}]*}/, '');
-      previewFontSet = App.prefs.print.paper + '|' + App.prefs.print.font;
+      const o = App.printOptions();
+      $('print-style').textContent = P.printCSS(o.paper, fontURL, o.font).replace(/@page[^}]*}/, '');
+      previewFontSet = o.paper + '|' + o.font;
     }
-    if (previewFontSet !== App.prefs.print.paper + '|' + App.prefs.print.font) { previewFontSet = false; return renderPreview(); }
+    const opt = App.printOptions();
+    if (previewFontSet !== opt.paper + '|' + opt.font) { previewFontSet = false; return renderPreview(); }
     const pages = $('preview-pages');
     pages.innerHTML = P.renderHTML(App.parsed, App.paginated);
     fitPreview();
-    $('preview-info').textContent = `${App.paginated.pages.length} pages, ${App.prefs.print.paper === 'a4' ? 'A4' : 'US Letter'}`;
+    $('preview-info').textContent = `${App.paginated.pages.length} pages, ${opt.paper === 'a4' ? 'A4' : 'US Letter'}`;
   }
   function fitPreview() {
     const pages = $('preview-pages');
     const scroll = $('preview-scroll');
-    const pw = (P.PAPER[App.prefs.print.paper] || P.PAPER.letter).width * 96;
+    const pw = (P.PAPER[App.printOptions().paper] || P.PAPER.letter).width * 96;
     const s = Math.min(1.2, (scroll.clientWidth - 40) / pw);
     pages.style.zoom = s;
     pages.style.width = pw + 'px';
@@ -631,6 +641,8 @@
     }
   });
   App.closeModal = closeModal;
+  App.openModal = openModal;
+  App.popoverAt = popoverAt;
 
   /* Title page editor */
   const TP_FIELDS = [['Title', 'title'], ['Credit', 'credit'], ['Author', 'author'], ['Source', 'source'], ['Draft date', 'draft date'], ['Contact', 'contact'], ['Notes', 'notes']];

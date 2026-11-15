@@ -5,7 +5,9 @@
  */
 (function (root) {
   'use strict';
-  const F = (typeof module !== 'undefined' && module.exports) ? require('./fountain.js') : root.Fountain;
+  const isNode = typeof module !== 'undefined' && module.exports;
+  const F = isNode ? require('./fountain.js') : root.Fountain;
+  const BD = isNode ? require('./beatdoc.js') : root.BeatDoc;
 
   const PAPER = {
     letter: { width: 8.5, height: 11, lines: 54 },
@@ -33,25 +35,32 @@
     underlineHeadings: false,
     spaceBeforeHeading: 2,
     contd: "(CONT'D)",
-    more: '(MORE)'
+    more: '(MORE)',
+    hidePageNumbers: false,
+    firstPageNumber: 1,
+    printHeadingColor: false,
+    macros: true
+    // revisions: Map(line index → array of revision generation per character, -1 for none)
   };
 
-  /* Flatten runs into a char array with style flags so we can wrap safely. */
-  function toChars(runs, extra) {
-    const out = [];
-    for (const r of runs) {
-      for (const ch of r.text) out.push({ c: ch, b: r.b || (extra && extra.b), i: r.i || (extra && extra.i), u: r.u || (extra && extra.u) });
-    }
-    return out;
+  /* Styled characters for a piece of text; `revs` gives a revision generation per source character. */
+  function toChars(text, extra, revs) {
+    return F.inlineChars(text).map(ch => ({
+      c: ch.c, b: ch.b || !!(extra && extra.b), i: ch.i || !!(extra && extra.i), u: ch.u || !!(extra && extra.u), h: ch.h,
+      r: revs ? (revs[ch.src] != null ? revs[ch.src] : -1) : -1
+    }));
   }
 
+  /* Runs for one printed line. The array carries `rev`: the highest revision generation on it, or -1. */
   function charsToRuns(chars) {
     const runs = [];
-    let cur = null;
+    let cur = null, rev = -1;
     for (const ch of chars) {
-      if (cur && cur.b === !!ch.b && cur.i === !!ch.i && cur.u === !!ch.u) cur.text += ch.c;
-      else { cur = { text: ch.c, b: !!ch.b, i: !!ch.i, u: !!ch.u }; runs.push(cur); }
+      if (ch.r > rev) rev = ch.r;
+      if (cur && cur.b === !!ch.b && cur.i === !!ch.i && cur.u === !!ch.u && cur.h === !!ch.h) cur.text += ch.c;
+      else { cur = { text: ch.c, b: !!ch.b, i: !!ch.i, u: !!ch.u, h: !!ch.h }; runs.push(cur); }
     }
+    runs.rev = rev;
     return runs;
   }
 
@@ -78,12 +87,30 @@
     return lines;
   }
 
-  function wrapText(text, width, extra) {
-    return wrapChars(toChars(F.parseInline(text), extra), width).map(charsToRuns);
+  function wrapText(text, width, extra, revs) {
+    return wrapChars(toChars(text, extra, revs), width).map(charsToRuns);
   }
 
   function mkLine(kind, runs, layout, src, more) {
-    return Object.assign({ kind, runs, left: layout.left, width: layout.width, align: layout.align || 'left', src }, more || {});
+    const l = Object.assign({ kind, runs, left: layout.left, width: layout.width, align: layout.align || 'left', src }, more || {});
+    if (runs && runs.rev >= 0) l.rev = runs.rev;
+    return l;
+  }
+
+  /* What prints for a line: its content with macros resolved. */
+  function textOf(L, opt) { return opt._macros && opt._macros.lines.has(L.index) ? opt._macros.lines.get(L.index) : L.content; }
+
+  /* Revision generation for each character of `text` (which came from source line L), or null. */
+  function revsFor(L, text, opt) {
+    const arr = opt.revisions && opt.revisions.get(L.index);
+    if (!arr) return null;
+    let off = L.raw.indexOf(text);
+    if (off === -1) off = L.raw.toUpperCase().indexOf(text.toUpperCase());
+    if (off !== -1) return Array.prototype.slice.call(arr, off, off + text.length);
+    // The printed text isn't a plain piece of the line (macros, notes cut out): mark the whole line.
+    let top = -1;
+    for (const g of arr) if (g > top) top = g;
+    return top >= 0 ? new Array(text.length).fill(top) : null;
   }
 
   /* Build the rendered lines for each element. */
@@ -93,42 +120,50 @@
       case 'heading': {
         const L = el.l;
         const style = { b: opt.boldHeadings, u: opt.underlineHeadings };
-        wrapText(L.content, LAYOUT.heading.width, style).forEach((r, k) =>
-          out.push(mkLine('heading', r, LAYOUT.heading, L.index, k === 0 ? { sceneNumber: L.sceneNumber } : {})));
+        const t = textOf(L, opt);
+        const color = opt.printHeadingColor && L.color ? F.colorValue(L.color) : null;
+        wrapText(t, LAYOUT.heading.width, style, revsFor(L, t, opt)).forEach((r, k) =>
+          out.push(mkLine('heading', r, LAYOUT.heading, L.index, Object.assign(k === 0 ? { sceneNumber: L.sceneNumber } : {}, color ? { color } : {}))));
         return { lines: out, space: opt.spaceBeforeHeading, keepWithNext: true, kind: 'heading' };
       }
       case 'action': {
         for (const L of el.lines) {
-          const t = L.content;
+          const t = textOf(L, opt);
           if (t.trim() === '') { out.push(mkLine('action', [], LAYOUT.action, L.index)); continue; }
-          wrapText(t, LAYOUT.action.width).forEach(r => out.push(mkLine('action', r, LAYOUT.action, L.index)));
+          wrapText(t, LAYOUT.action.width, null, revsFor(L, t, opt)).forEach(r => out.push(mkLine('action', r, LAYOUT.action, L.index)));
         }
         return { lines: out, space: 1, splittable: true, kind: 'action' };
       }
       case 'transition': {
         const L = el.l;
-        wrapText(L.content.toUpperCase(), 60).forEach(r => out.push(mkLine('transition', r, LAYOUT.transition, L.index)));
+        const t = textOf(L, opt).toUpperCase();
+        wrapText(t, 60, null, revsFor(L, t, opt)).forEach(r => out.push(mkLine('transition', r, LAYOUT.transition, L.index)));
         return { lines: out, space: 1, kind: 'transition' };
       }
       case 'centered': {
         const L = el.l;
-        wrapText(L.content, 60).forEach(r => out.push(mkLine('centered', r, LAYOUT.centered, L.index)));
+        const t = textOf(L, opt);
+        wrapText(t, 60, null, revsFor(L, t, opt)).forEach(r => out.push(mkLine('centered', r, LAYOUT.centered, L.index)));
         return { lines: out, space: 1, kind: 'centered' };
       }
       case 'lyrics': {
-        for (const L of el.lines) wrapText(L.content, 60, { i: true }).forEach(r => out.push(mkLine('lyrics', r, LAYOUT.lyrics, L.index)));
+        for (const L of el.lines) { const t = textOf(L, opt); wrapText(t, 60, { i: true }, revsFor(L, t, opt)).forEach(r => out.push(mkLine('lyrics', r, LAYOUT.lyrics, L.index))); }
         return { lines: out, space: 1, kind: 'lyrics' };
       }
       case 'dialogue-block': {
-        return Object.assign(layoutDialogue(el, LAYOUT.character, LAYOUT.parenthetical, LAYOUT.dialogue), { space: 1, splittable: true, kind: 'dialogue' });
+        return Object.assign(layoutDialogue(el, LAYOUT.character, LAYOUT.parenthetical, LAYOUT.dialogue, opt), { space: 1, splittable: true, kind: 'dialogue' });
       }
       case 'dual': {
         const lw = 28, rw = 29;
-        const left = layoutDialogue(el.left, { left: 7, width: lw - 7 }, { left: 3, width: lw - 4 }, { left: 0, width: lw });
-        const right = layoutDialogue(el.right, { left: 31 + 7, width: rw - 7 }, { left: 31 + 3, width: rw - 4 }, { left: 31, width: rw });
+        const left = layoutDialogue(el.left, { left: 7, width: lw - 7 }, { left: 3, width: lw - 4 }, { left: 0, width: lw }, opt);
+        const right = layoutDialogue(el.right, { left: 31 + 7, width: rw - 7 }, { left: 31 + 3, width: rw - 4 }, { left: 31, width: rw }, opt);
         const n = Math.max(left.lines.length, right.lines.length);
         for (let k = 0; k < n; k++) {
-          out.push({ kind: 'dual', cols: [left.lines[k] || null, right.lines[k] || null], src: (left.lines[k] || right.lines[k]).src });
+          const a = left.lines[k], b = right.lines[k];
+          const d = { kind: 'dual', cols: [a || null, b || null], src: (a || b).src };
+          const rev = Math.max(a && a.rev >= 0 ? a.rev : -1, b && b.rev >= 0 ? b.rev : -1);
+          if (rev >= 0) d.rev = rev;
+          out.push(d);
         }
         return { lines: out, space: 1, kind: 'dual' };
       }
@@ -139,17 +174,18 @@
     }
   }
 
-  function layoutDialogue(block, cueL, parL, diaL) {
+  function layoutDialogue(block, cueL, parL, diaL, opt) {
     const lines = [];
-    const cueText = block.cue.content.toUpperCase();
-    wrapText(cueText, cueL.width).forEach(r => lines.push(mkLine('character', r, cueL, block.cue.index)));
+    const cueText = textOf(block.cue, opt).toUpperCase();
+    wrapText(cueText, cueL.width, null, revsFor(block.cue, cueText, opt)).forEach(r => lines.push(mkLine('character', r, cueL, block.cue.index)));
     const cueCount = lines.length;
     for (const p of block.parts) {
       if (p.type === 'parenthetical') {
-        wrapText(p.content, parL.width).forEach(r => lines.push(mkLine('parenthetical', r, parL, p.index)));
+        const t = textOf(p, opt);
+        wrapText(t, parL.width, null, revsFor(p, t, opt)).forEach(r => lines.push(mkLine('parenthetical', r, parL, p.index)));
       } else {
-        const t = p.raw === '  ' ? '' : p.content;
-        wrapText(t, diaL.width).forEach(r => lines.push(mkLine('dialogue', r, diaL, p.index)));
+        const t = p.raw === '  ' ? '' : textOf(p, opt);
+        wrapText(t, diaL.width, null, revsFor(p, t, opt)).forEach(r => lines.push(mkLine('dialogue', r, diaL, p.index)));
       }
     }
     return { lines, cueCount, cueText, cueL, parL, diaL, name: block.name };
@@ -162,6 +198,7 @@
 
   function paginate(parsed, options) {
     const opt = Object.assign({}, DEFAULTS, options || {});
+    opt._macros = opt.macros && BD ? BD.resolveMacros(parsed) : null;
     const paper = PAPER[opt.paper] || PAPER.letter;
     const MAX = paper.lines;
     const pages = [];
@@ -281,32 +318,41 @@
       if (r.u) h = `<u>${h}</u>`;
       if (r.i) h = `<i>${h}</i>`;
       if (r.b) h = `<b>${h}</b>`;
+      if (r.h) h = `<mark>${h}</mark>`;
       return h;
     }).join('');
+  }
+
+  /* Revision mark in the right margin: the marker of the newest revision on that printed line. */
+  function revHTML(l) {
+    if (!(l.rev >= 0) || !BD) return '';
+    const g = BD.GENERATIONS[l.rev];
+    return g ? `<span class="rvm">${esc(g.marker)}</span>` : '';
   }
 
   function lineHTML(l, opt) {
     if (l.kind === 'blank') return '<div class="pl"></div>';
     if (l.kind === 'dual') {
-      return '<div class="pl dual">' + l.cols.map(c => c ? cellHTML(c) : '').join('') + '</div>';
+      return '<div class="pl dual">' + l.cols.map(c => c ? cellHTML(c) : '').join('') + revHTML(l) + '</div>';
     }
     let sn = '';
     if (l.sceneNumber && opt.sceneNumbers) {
       sn = `<span class="sn snl">${esc(l.sceneNumber)}</span><span class="sn snr">${esc(l.sceneNumber)}</span>`;
     }
-    return `<div class="pl k-${l.kind}" data-src="${l.src}">${sn}${cellHTML(l)}</div>`;
+    return `<div class="pl k-${l.kind}" data-src="${l.src}">${sn}${cellHTML(l)}${revHTML(l)}</div>`;
   }
 
   function cellHTML(l) {
-    const style = `left:${l.left}ch;width:${l.width}ch;text-align:${l.align}`;
+    const style = `left:${l.left}ch;width:${l.width}ch;text-align:${l.align}` + (l.color ? `;color:${l.color}` : '');
     return `<span class="pc" style="${style}">${runsHTML(l.runs)}</span>`;
   }
 
-  function titlePageHTML(fields) {
+  function titlePageHTML(fields, macros) {
     if (!fields || !fields.length) return '';
     const get = (k) => {
-      const f = fields.find(x => x.key.toLowerCase() === k);
-      return f ? f.value : '';
+      const i = fields.findIndex(x => x.key.toLowerCase() === k);
+      if (i === -1) return '';
+      return macros && macros.title.has(i) ? macros.title.get(i) : fields[i].value;
     };
     const fmt = (v) => v.split('\n').map(x => runsHTML(F.parseInline(x)) || '&nbsp;').join('<br>');
     const titleV = get('title'), credit = get('credit'), author = get('author') || get('authors'),
@@ -327,10 +373,12 @@
 
   function renderHTML(parsed, result) {
     const opt = result.options;
-    let html = titlePageHTML(parsed.title);
+    let html = titlePageHTML(parsed.title, opt._macros);
+    const first = opt.firstPageNumber > 0 ? opt.firstPageNumber : 1;
     for (const p of result.pages) {
       html += `<section class="page" data-page="${p.number}">`;
-      if (p.number > 1) html += `<div class="pnum">${p.number}.</div>`;
+      const shown = p.number - 1 + first;
+      if (!opt.hidePageNumbers && (p.number > 1 || first > 1)) html += `<div class="pnum">${shown}.</div>`;
       html += '<div class="pbody">' + p.lines.map(l => lineHTML(l, opt)).join('') + '</div></section>';
     }
     return html;
@@ -360,6 +408,8 @@ ${fontURL ? `@font-face{font-family:'Courier Prime';font-weight:400;font-style:n
 .screenplay .sn { position: absolute; top: 0; }
 .screenplay .snl { left: -0.75in; }
 .screenplay .snr { left: 6.35in; }
+.screenplay .rvm { position: absolute; top: 0; left: 6.15in; font-weight: 700; }
+.screenplay mark { background: #fff07a; color: inherit; }
 .screenplay .title-page .tp-center { position: absolute; top: 3.5in; left: 1in; right: 1in; text-align: center; line-height: 12pt; }
 .screenplay .title-page .tp-title { margin-bottom: 48pt; }
 .screenplay .title-page .tp-credit { margin-bottom: 12pt; }

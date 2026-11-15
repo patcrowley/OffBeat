@@ -30,6 +30,8 @@ const PREF_FILE = () => path.join(app.getPath('userData'), 'prefs.json');
 const DEFAULT_PREFS = {
   theme: 'system',          // system | light | dark
   dimMarkup: false,
+  showRevisions: true,
+  showTags: true,
   showPageBreaks: true,
   smartLineBreaks: true,
   autoCaps: true,
@@ -691,6 +693,34 @@ function buildMenu() {
       ]
     },
     {
+      label: '&Review', submenu: [
+        ed('Revision Mode', 'revision-mode', 'F8'),
+        { label: 'Revision Color', submenu: ['Blue', 'Pink', 'Yellow', 'Green', 'Goldenrod', 'Buff', 'Rose', 'Cherry'].map((c, k) => ed(c, 'rev-gen:' + k)) },
+        ed('Mark Selection as Revised', 'mark-revised'),
+        ed('Suggest Selection for Removal', 'mark-removal'),
+        ed('Clear Revision Marks', 'clear-revisions'),
+        { type: 'separator' },
+        ed('Add Review Note…', 'add-review', 'CmdOrCtrl+Shift+R'),
+        ed('Next Review Note', 'next-review'),
+        ed('Previous Review Note', 'prev-review'),
+        ed('Remove Review Notes', 'remove-reviews'),
+        { type: 'separator' },
+        { label: 'Tag Selection As', submenu: [['Cast', 'cast'], ['Prop', 'prop'], ['Costume', 'costume'], ['Makeup', 'makeup'], ['Set Design', 'setDesign'],
+          ['Vehicle', 'vehicle'], ['Animal', 'animal'], ['Extras', 'extras'], ['Stunt', 'stunt'], ['Special Effect', 'sfx'], ['Visual Effect', 'vfx'],
+          ['Camera', 'camera'], ['Sound', 'sound'], ['Music', 'music'], ['Other', 'other']].map(([l, k]) => ed(l, 'tag:' + k)) },
+        ed('Remove Tags', 'remove-tags'),
+        { type: 'separator' },
+        { label: 'Line Alternatives', submenu: [
+          ed('New Alternative for This Line', 'alt-add'),
+          ed('Next Version', 'alt-next', 'Alt+Down'),
+          ed('Previous Version', 'alt-prev', 'Alt+Up'),
+          ed('Keep Only This Version', 'alt-remove')
+        ] },
+        { type: 'separator' },
+        ed('Document Settings…', 'doc-settings')
+      ]
+    },
+    {
       label: '&View', submenu: [
         act('Outline Sidebar', 'toggle-outline', 'CmdOrCtrl+Shift+O'),
         act('Index Cards', 'toggle-cards', 'CmdOrCtrl+Shift+K'),
@@ -704,6 +734,8 @@ function buildMenu() {
         { label: 'Appearance', submenu: [radio('Follow System', 'theme', 'system'), radio('Light', 'theme', 'light'), radio('Dark', 'theme', 'dark')] },
         toggle('Dim Fountain Markup', 'dimMarkup', 'CmdOrCtrl+Shift+M'),
         toggle('Show Page Breaks', 'showPageBreaks'),
+        toggle('Show Revisions', 'showRevisions'),
+        toggle('Show Tags', 'showTags'),
         toggle('Typewriter Scrolling', 'typewriter'),
         { type: 'separator' },
         { label: 'Interface Size', submenu: [

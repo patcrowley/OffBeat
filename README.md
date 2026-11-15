@@ -30,6 +30,13 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 - Light/dark mode (or follow Windows), dim markup, typewriter scrolling, script zoom
 - **Interface size** (View → Interface Size, 75%–200%) makes everything bigger or smaller: menus, sidebar, dialogs and the script. In a narrow window the script keeps the size you chose and wraps lines a little earlier, instead of shrinking. PDFs and printouts are never affected
 - **Editor fonts** (View → Editor Font): Courier Prime, Courier New, IBM Plex Mono, Atkinson Hyperlegible Mono (designed for low vision) and OpenDyslexic (designed for dyslexia). This only changes how the script looks while you write
+- **Works with Beat's own data.** Beat keeps revisions, review notes, tags and other settings in a block at the end of the `.fountain` file. Offbeat reads that block, shows what's in it, keeps everything it doesn't use, and writes it back the way Beat does, with every range moved to follow your edits. You can open a script in Beat on a Mac, keep writing in Offbeat on a PC, and go back without losing or misplacing anything
+- **Revisions** (Review menu): colored revision marks in Beat's eight generations (Blue, Pink, Yellow, Green, Goldenrod, Buff, Rose, Cherry). Turn on Revision Mode (F8) and everything you type is marked in the current color; or select text and mark it as revised, or suggest it for removal. Revised lines get the standard margin marks (\*, \*\*, +, ++ …) in the editor, the preview and PDFs. Document Settings chooses which generations print
+- **Review notes** (Ctrl+Shift+R): attach a note to selected text. Noted text is highlighted; click it to read, edit or remove the note. Notes never print
+- **Tags**: tag selected text as cast, prop, costume, makeup, set design, vehicle, animal, extras, stunt, effects, camera, sound or music, for a production breakdown in Beat. View → Show Tags turns the colored underlines on and off
+- **Line alternatives**: keep several versions of a line and switch between them with Alt+Up and Alt+Down (Review → Line Alternatives)
+- **Highlights and macros**: `+highlighted text+` prints with a yellow background; `{{macros}}` fill in when you print, such as `{{serial shot}}` for shot numbers, `{{date}}` for today's date, `{{panel}}` for comic panels, or your own `{{hero = Mae}}` … `{{hero}}`
+- **Document settings** (Review → Document Settings): paper size, first scene number, first page number, scene and page numbers, and printed heading colors, saved inside the script the way Beat saves them
 - **Reopens your last scripts** where you left off, all of the tabs, each at the same cursor position (Settings → Reopen Last Script on Startup)
 - **Autosave** (on by default, File → Autosave): saves a couple of seconds after you stop typing, when you switch to another app, and when you close, without asking. It works once a script has been saved to a file. Backups of saved versions are kept too (File → Show Backups Folder); autosaves add one at most every 10 minutes
 
@@ -60,6 +67,10 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 | --- | --- |
 | ![Dark mode with the paginated print preview and the scene timeline](docs/screenshots/preview-dark.png) | ![The statistics window: pages, scenes, interior and exterior split, dialogue per character](docs/screenshots/statistics.png) |
 
+| Revision marks, a review note and production tags, all kept in Beat's format |
+| --- |
+| ![Pink and blue revision marks with margin asterisks, prop tags underlined in orange, and a review note open on a line of dialogue](docs/screenshots/revisions.png) |
+
 ## Keyboard shortcuts
 
 | Action | Shortcut |
@@ -79,6 +90,9 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 | Note / Omit | Ctrl+Shift+N / Ctrl+Shift+B |
 | Force heading, action, character, transition, lyrics, centered | Ctrl+Alt+1 … 6 |
 | Dual dialogue | Ctrl+Shift+D |
+| Revision mode on / off | F8 |
+| Review note | Ctrl+Shift+R |
+| Previous / next version of a line | Alt+Up / Alt+Down |
 | Dim markup | Ctrl+Shift+M |
 | Interface size larger / smaller | Ctrl+Shift+= / Ctrl+Shift+- |
 | Script zoom | Ctrl+= / Ctrl+- / Ctrl+0 |
@@ -112,8 +126,10 @@ preload.js           Safe bridge between the window and the main process
 src/core/fountain.js Fountain parser (line classification, elements, outline)
 src/core/paginate.js Pagination and print/PDF rendering
 src/core/fdx.js      Final Draft import/export and statistics
+src/core/beatdoc.js  Beat's data block (revisions, notes, tags, settings) and macros
 src/app.js           Editor: formatting, smart keys, autocomplete, commands
 src/views.js         Outline, index cards, timeline, preview, dialogs
+src/beat.js          Revisions, review notes, tags and line alternatives in the editor
 src/mode.js          Inline syntax styling for the editor
 test/                Unit tests and end-to-end app tests
 ```

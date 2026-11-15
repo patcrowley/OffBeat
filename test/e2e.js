@@ -70,7 +70,11 @@ module.exports = async ({ win, saveDoc, loadInto, docs }) => {
   const ok = await saveDoc(win, false);
   const saved = fs.readFileSync(file, 'utf8');
   check('save writes file', ok && saved.includes('More action.'));
-  check('settings block preserved on save', saved.trim().endsWith(settings), saved.slice(-200));
+  // Beat's data block is rewritten the way Beat writes it: same settings, fresh text length.
+  const BD = require('../src/core/beatdoc.js');
+  const back = BD.read(saved);
+  check('settings block preserved on save', back.settings && back.settings['Revision Color'] === 'blue' && back.settings.Characters.MAE.gender === 'woman'
+    && back.settings['Text Length'] === saved.indexOf(BD.START) && back.body.startsWith('INT. A - DAY\n\nHello.\n\nMore action.\n'), saved.slice(-260));
   check('clean after save', docs.get(win.id).dirty === false);
   const bdir = path.join(require('electron').app.getPath('userData'), 'Backups', 'beat file');
   check('backup created', fs.existsSync(bdir) && fs.readdirSync(bdir).length > 0);

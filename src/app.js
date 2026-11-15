@@ -19,7 +19,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     emit(ev, d) { for (const fn of this.listeners[ev] || []) { try { fn(d); } catch (e) { console.error(e); } } }
   };
   // The script that's showing: these read and write the active tab.
-  const TAB_DEFAULTS = { path: null, name: 'Untitled', settingsRaw: null, cleanGen: 0 };
+  const TAB_DEFAULTS = { path: null, name: 'Untitled', beat: null, cleanGen: 0 };
   for (const k of Object.keys(TAB_DEFAULTS)) {
     Object.defineProperty(App, k, {
       get() { return App.active ? App.active[k] : TAB_DEFAULTS[k]; },
@@ -64,7 +64,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   App.ensureParsed = function () {
     const gen = cm.changeGeneration();
     if (App.parseGen === gen && App.parsed) return App.parsed;
-    App.parsed = F.parse(cm.getValue());
+    App.parsed = F.parse(cm.getValue(), { sceneStart: App.sceneStart() });
     App.parseGen = gen;
     applyLineClasses();
     return App.parsed;
@@ -113,12 +113,26 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     const gen = App.parseGen;
     if (App.paginateGen === gen && App.paginated && !App._forcePaginate) return App.paginated;
     App._forcePaginate = false;
-    App.paginated = P.paginate(App.parsed, App.prefs ? App.prefs.print : {});
+    App.paginated = P.paginate(App.parsed, App.printOptions());
     App.paginateGen = gen;
     updatePageGaps();
     App.emit('paginate', App.paginated);
     updateStatus();
     return App.paginated;
+  };
+
+  /* Print options: the app's settings, with anything the script's own (Beat) settings override. */
+  App.printOptions = function (tab) {
+    tab = tab || App.active;
+    const base = Object.assign({}, P.DEFAULTS, App.prefs ? App.prefs.print : {});
+    const s = tab && tab.beat ? tab.beat.settings : null;
+    const o = Object.assign(base, window.BeatDoc.printOverrides(s));
+    if (App.beatPrintExtras) Object.assign(o, App.beatPrintExtras(tab));
+    return o;
+  };
+  App.sceneStart = function (tab) {
+    tab = tab || App.active;
+    return window.BeatDoc.sceneStart(tab && tab.beat ? tab.beat.settings : null);
   };
 
   /* ---------------- Scene numbers & page gaps ---------------- */
@@ -239,10 +253,18 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   }
   App.updateStatus = updateStatus;
 
+  /* Something saved with the script changed without touching its text (document settings, revision mode). */
+  App.touchMeta = function (tab) {
+    tab = tab || App.active; if (!tab) return;
+    tab.metaSeq = (tab.metaSeq || 0) + 1;
+    updateDirty(tab);
+    scheduleAutosave(1500, tab);
+  };
+
   /* ---------------- Dirty tracking (per tab) ---------------- */
   function updateDirty(tab, forceUI) {
     tab = tab || App.active; if (!tab) return;
-    const dirty = !tab.doc.isClean(tab.cleanGen);
+    const dirty = !tab.doc.isClean(tab.cleanGen) || (tab.metaSeq || 0) !== (tab.cleanMeta || 0);
     const changed = dirty !== tab.lastDirty;
     if (changed) { tab.lastDirty = dirty; host.setDirty(dirty, tab.id); App.renderTabs(); }
     if (tab === App.active && (changed || forceUI)) {
@@ -586,15 +608,17 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   }
 
   /* ---------------- Tabs: one CodeMirror document per open script ---------------- */
-  // Beat keeps a settings block at the end of the file; it's hidden while editing and put back on save.
+  // Beat keeps its data (revisions, notes, tags, settings) in a block at the end of the file.
+  // It's taken off while editing, shown as marks in the text, and written back on save (beat.js).
   function makeDoc(text) {
-    const s = F.splitSettings(text || '');
-    const body = (s.raw ? s.body.replace(/\s+$/, '\n') : s.body).replace(/\r\n?/g, '\n');
-    return { doc: CodeMirror.Doc(body, 'fountain'), settingsRaw: s.raw || null };
+    const info = window.BeatDoc.read(text || '');
+    return { doc: CodeMirror.Doc(info.body, 'fountain'), info };
   }
   function fillTab(tab, text, path, name) {
-    const { doc, settingsRaw } = makeDoc(text);
-    Object.assign(tab, { doc, settingsRaw, path: path || null, name: name || 'Untitled', savedGen: null, lastDirty: undefined, marks: null, pendingPos: null, ignored: new Set() });
+    const { doc, info } = makeDoc(text);
+    Object.assign(tab, { doc, beat: null, path: path || null, name: name || 'Untitled', savedGen: null, lastDirty: undefined, marks: null, pendingPos: null, ignored: new Set(), metaSeq: 0, cleanMeta: 0, savedMeta: null, decor: null });
+    if (App.beatAttach) App.beatAttach(tab, info);
+    else tab.beat = { settings: info.settings, raw: info.raw, alts: info.alts };
     tab.cleanGen = doc.changeGeneration(true);
     return tab;
   }
@@ -642,6 +666,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     const tab = createTab(id, text, path, name);
     activate(tab);
     cm.setCursor({ line: 0, ch: 0 });
+    if (!pos && App.beatCaret) pos = App.beatCaret(tab);
     if (pos && pos.line < cm.lineCount()) restorePosition(pos);
     return tab;
   }
@@ -667,6 +692,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     if (host.tabInfo && typeof tab.id === 'number') host.tabInfo(tab.id, { path: tab.path, name: tab.name });
     activate(tab, { force: true });
     cm.setCursor({ line: 0, ch: 0 });
+    if (!pos && App.beatCaret) pos = App.beatCaret(tab);
     if (pos && pos.line < cm.lineCount()) restorePosition(pos);
     cm.focus();
   }
@@ -794,10 +820,11 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   cm.on('scroll', reportPosition);
 
   function getTextFor(tab) {
-    let t = tab.doc.getValue();
-    if (tab.settingsRaw) t = t.replace(/\s+$/, '') + '\n\n' + tab.settingsRaw;
-    return t;
+    if (App.beatSerialize) return App.beatSerialize(tab);
+    const b = tab.beat || {};
+    return window.BeatDoc.write(tab.doc.getValue(), b.settings, b.alts, b.raw);
   }
+  App.getTextFor = getTextFor;
   App.getText = function () { return App.active ? getTextFor(App.active) : cm.getValue(); };
 
   App.suggestedName = function () {
@@ -834,10 +861,11 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     }
     // Clean as of the text that was written; anything typed during the save stays unsaved.
     tab.cleanGen = tab.savedGen != null ? tab.savedGen : tab.doc.changeGeneration(true);
-    tab.savedGen = null;
+    tab.cleanMeta = tab.savedMeta != null ? tab.savedMeta : (tab.metaSeq || 0);
+    tab.savedGen = null; tab.savedMeta = null;
     tab.lastDirty = undefined; updateDirty(tab, true);   // always re-report, so the window knows about later edits
     tabBar && (tabBar._html = null); renderTabs();
-    if (tab.doc.isClean(tab.cleanGen)) { if (tab === App.active) document.getElementById('st-saved').textContent = auto ? 'Autosaved' : 'Saved'; }
+    if (tab.doc.isClean(tab.cleanGen) && (tab.metaSeq || 0) === (tab.cleanMeta || 0)) { if (tab === App.active) document.getElementById('st-saved').textContent = auto ? 'Autosaved' : 'Saved'; }
     else scheduleAutosave(1500, tab);
   });
   host.on('prefs', (p) => { App.prefs = p; applyPrefs(); });
@@ -847,6 +875,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     const tab = tabFor(payload);
     if (!tab) return host.reply(id, cm.getValue());
     tab.savedGen = tab.doc.changeGeneration(true);
+    tab.savedMeta = tab.metaSeq || 0;
     host.reply(id, getTextFor(tab));
   });
   host.on('request-is-empty', ({ id, payload }) => {
@@ -856,23 +885,25 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   host.on('request-suggested-name', ({ id, payload }) => {
     const tab = tabFor(payload);
     if (!tab || tab === App.active) return host.reply(id, App.suggestedName());
-    const t = F.parse(tab.doc.getValue()).title.find(f => f.key.toLowerCase() === 'title');
+    const t = F.parse(tab.doc.getValue(), { sceneStart: App.sceneStart(tab) }).title.find(f => f.key.toLowerCase() === 'title');
     host.reply(id, t ? F.plainInline(t.value.split('\n')[0]).replace(/[\\/:*?"<>|]/g, '').trim() || 'Untitled' : (tab.name || 'Untitled').replace(/\.[^.]+$/, ''));
   });
   host.on('request-print-html', async ({ id }) => {
     App.ensureParsed();
-    const res = P.paginate(App.parsed, App.prefs.print);
+    const opt = App.printOptions();
+    const res = P.paginate(App.parsed, opt);
     const fontURL = await host.fontURL();
-    host.reply(id, { html: P.renderHTML(App.parsed, res), css: P.printCSS(App.prefs.print.paper, fontURL, App.prefs.print.font), suggested: App.suggestedName() });
+    host.reply(id, { html: P.renderHTML(App.parsed, res), css: P.printCSS(opt.paper, fontURL, opt.font), suggested: App.suggestedName() });
   });
   host.on('request-export', ({ id, payload }) => {
     App.ensureParsed();
     if (payload === 'fdx') host.reply(id, { content: FDX.toFDX(cm.getValue()), suggested: App.suggestedName() });
     else {
-      const res = P.paginate(App.parsed, App.prefs.print);
+      const opt = App.printOptions();
+      const res = P.paginate(App.parsed, opt);
       const html = `<!doctype html><html><head><meta charset="utf-8"><title>${App.suggestedName()}</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Courier+Prime:ital,wght@0,400;0,700;1,400;1,700&display=swap">
-<style>${P.printCSS(App.prefs.print.paper, null, App.prefs.print.font)} body{background:#e6e6e6;margin:0;padding:24px 0} .screenplay .page{margin:0 auto 24px;box-shadow:0 1px 4px rgba(0,0,0,.2)} @media print{body{background:#fff;padding:0}.screenplay .page{margin:0;box-shadow:none}}</style>
+<style>${P.printCSS(opt.paper, null, opt.font)} body{background:#e6e6e6;margin:0;padding:24px 0} .screenplay .page{margin:0 auto 24px;box-shadow:0 1px 4px rgba(0,0,0,.2)} @media print{body{background:#fff;padding:0}.screenplay .page{margin:0;box-shadow:none}}</style>
 </head><body><div class="screenplay">${P.renderHTML(App.parsed, res)}</div></body></html>`;
       host.reply(id, { content: html, suggested: App.suggestedName() });
     }
@@ -884,7 +915,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     clearTimeout(tab.autoTimer);
     if (!App.prefs || !App.prefs.autosave || !tab.path) return;
     tab.autoTimer = setTimeout(() => {
-      if (App.tabs.includes(tab) && !tab.doc.isClean(tab.cleanGen)) host.autosave(tab.id);
+      if (App.tabs.includes(tab) && (!tab.doc.isClean(tab.cleanGen) || (tab.metaSeq || 0) !== (tab.cleanMeta || 0))) host.autosave(tab.id);
     }, delay);
   }
   const autosaveAll = () => App.tabs.forEach(t => scheduleAutosave(0, t));

@@ -10,7 +10,8 @@
    * Move the scenes whose headings are on `sceneLines` so they sit, in script order,
    * just before line `before` (a scene or section heading), or at the end when `before` is null.
    * Exactly one blank line is left around the moved group and where each scene came from.
-   * Returns { text, lines } where `lines` are the moved headings' new line numbers,
+   * Returns { text, lines, origin } where `lines` are the moved headings' new line numbers and
+   * `origin[k]` is the old line number of new line k (-1 for an added blank line),
    * or null when nothing would change.
    */
   function moveScenes(text, sceneLines, before) {
@@ -27,10 +28,11 @@
     }
 
     const removed = new Set();
+    // Work with line numbers, so we know where every line came from.
     const blocks = items.map(it => {
       const b = [];
-      for (let k = it.line; k <= it.endLine; k++) { b.push(lines[k]); removed.add(k); }
-      while (b.length > 1 && b[b.length - 1].trim() === '') b.pop();
+      for (let k = it.line; k <= it.endLine; k++) { b.push(k); removed.add(k); }
+      while (b.length > 1 && lines[b[b.length - 1]].trim() === '') b.pop();
       return b;
     });
 
@@ -39,31 +41,31 @@
     let target = null;
     for (let k = 0; k < lines.length; k++) {
       if (k === before) target = remaining.length;
-      if (!removed.has(k)) remaining.push(lines[k]);
+      if (!removed.has(k)) remaining.push(k);
     }
     if (before === null || before === undefined || target === null) target = remaining.length;
 
     let prev = target - 1;
-    while (prev >= 0 && remaining[prev].trim() === '') prev--;
+    while (prev >= 0 && lines[remaining[prev]].trim() === '') prev--;
     const head = remaining.slice(0, prev + 1);
     const tail = remaining.slice(target);
-    while (tail.length && tail[0].trim() === '') tail.shift();
+    while (tail.length && lines[tail[0]].trim() === '') tail.shift();
 
     const group = [];
     const offsets = [];
-    blocks.forEach((b, i) => { if (i) group.push(''); offsets.push(group.length); group.push(...b); });
+    blocks.forEach((b, i) => { if (i) group.push(-1); offsets.push(group.length); group.push(...b); });
 
     const out = head.slice();
-    if (out.length) out.push('');
+    if (out.length) out.push(-1);
     const start = out.length;
     out.push(...group);
-    out.push('');
+    out.push(-1);
     if (tail.length) out.push(...tail);
     else if (lines[lines.length - 1] !== '') out.pop();   // keep the file's original ending
 
-    const result = out.join('\n');
+    const result = out.map(k => k === -1 ? '' : lines[k]).join('\n');
     if (result === text) return null;
-    return { text: result, lines: offsets.map(o => start + o) };
+    return { text: result, lines: offsets.map(o => start + o), origin: out };
   }
 
   /* Smallest line range that differs between two texts, for a minimal editor update. */

@@ -98,8 +98,9 @@
   }
 
   /* ---------- Main parse ---------- */
-  function parse(text) {
+  function parse(text, options) {
     text = (text || '').replace(/\r\n?/g, '\n');
+    const firstScene = options && options.sceneStart > 0 ? Math.floor(options.sceneStart) : 1;
     const raw = text.split('\n');
     const title = parseTitlePage(raw);
     const lines = new Array(raw.length);
@@ -130,7 +131,7 @@
     };
 
     let prevType = 'empty';
-    let sceneCounter = 0;
+    let sceneCounter = firstScene - 1;
     for (let i = 0; i < raw.length; i++) {
       const t = raw[i];
       const s = stripped[i];
@@ -332,32 +333,51 @@
   }
 
   /* ---------- Inline markup ---------- */
-  // Returns runs: [{text, b, i, u}]
-  const ESC = { '*': '', '_': '' };
-  function parseInline(text) {
+  // **bold**, *italic*, _underline_, ***both***, and Beat's +highlight+. A backslash escapes a marker.
+  // Returns one entry per visible character: { c, b, i, u, h, src } where src is its index in `text`.
+  const INLINE = [
+    { re: /\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*/g, n: 3, f: ['b', 'i'] },
+    { re: /\*\*(?=\S)(.+?)(?<=\S)\*\*/g, n: 2, f: ['b'] },
+    { re: /\*(?=\S)(.+?)(?<=\S)\*/g, n: 1, f: ['i'] },
+    { re: /_(?=\S)(.+?)(?<=\S)_/g, n: 1, f: ['u'] },
+    { re: /\+(?=\S)(.+?)(?<=\S)\+/g, n: 1, f: ['h'] }
+  ];
+  function inlineChars(text) {
     if (!text) return [];
-    let s = text.replace(/\\([*_])/g, (m, c) => ESC[c]);
-    s = s.replace(/\*\*\*(?=\S)(.+?)(?<=\S)\*\*\*/g, '$1');
-    s = s.replace(/\*\*(?=\S)(.+?)(?<=\S)\*\*/g, '$1');
-    s = s.replace(/\*(?=\S)(.+?)(?<=\S)\*/g, '$1');
-    s = s.replace(/_(?=\S)(.+?)(?<=\S)_/g, '$1');
-    const runs = [];
-    let b = 0, it = 0, u = 0, buf = '';
-    const push = () => { if (buf) { runs.push({ text: buf, b: b > 0, i: it > 0, u: u > 0 }); buf = ''; } };
-    for (const ch of s) {
-      switch (ch) {
-        case '': push(); b++; break;
-        case '': push(); b--; break;
-        case '': push(); it++; break;
-        case '': push(); it--; break;
-        case '': push(); u++; break;
-        case '': push(); u--; break;
-        case '': buf += '*'; break;
-        case '': buf += '_'; break;
-        default: buf += ch;
+    const n = text.length;
+    const drop = new Uint8Array(n);
+    const mask = text.split('');
+    for (let k = 0; k < n - 1; k++) {
+      if (text[k] === '\\' && '*_+'.includes(text[k + 1])) { drop[k] = 1; mask[k] = '\u0002'; mask[k + 1] = '\u0002'; k++; }
+    }
+    const diff = { b: new Int16Array(n + 1), i: new Int16Array(n + 1), u: new Int16Array(n + 1), h: new Int16Array(n + 1) };
+    for (const p of INLINE) {
+      const s = mask.join('');
+      p.re.lastIndex = 0;
+      let m;
+      while ((m = p.re.exec(s))) {
+        const a = m.index, e = a + m[0].length;
+        for (let k = 0; k < p.n; k++) { drop[a + k] = 1; drop[e - 1 - k] = 1; mask[a + k] = '\u0001'; mask[e - 1 - k] = '\u0001'; }
+        for (const f of p.f) { diff[f][a + p.n]++; diff[f][e - p.n]--; }
       }
     }
-    push();
+    const out = [];
+    const lvl = { b: 0, i: 0, u: 0, h: 0 };
+    for (let k = 0; k < n; k++) {
+      lvl.b += diff.b[k]; lvl.i += diff.i[k]; lvl.u += diff.u[k]; lvl.h += diff.h[k];
+      if (drop[k]) continue;
+      out.push({ c: text[k], b: lvl.b > 0, i: lvl.i > 0, u: lvl.u > 0, h: lvl.h > 0, src: k });
+    }
+    return out;
+  }
+  // Returns runs: [{text, b, i, u, h}]
+  function parseInline(text) {
+    const runs = [];
+    let cur = null;
+    for (const ch of inlineChars(text)) {
+      if (cur && cur.b === ch.b && cur.i === ch.i && cur.u === ch.u && cur.h === ch.h) cur.text += ch.c;
+      else { cur = { text: ch.c, b: ch.b, i: ch.i, u: ch.u, h: ch.h }; runs.push(cur); }
+    }
     return runs;
   }
 
@@ -382,7 +402,7 @@
     return { body: text.slice(0, idx), settings: data, raw: text.slice(idx) };
   }
 
-  const api = { parse, parseInline, plainInline, isCharacterCue, characterName, colorValue, COLORS,
+  const api = { parse, parseInline, inlineChars, plainInline, isCharacterCue, characterName, colorValue, COLORS,
     HEADING_RE, COLOR_RE, splitSettings, SETTINGS_START, SETTINGS_END };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Fountain = api;

@@ -152,4 +152,116 @@ t('line diff', () => {
   const d = S.lineDiff('a\nb\nc\nd', 'a\nx\ny\nd');
   assert.deepStrictEqual([d.from, d.oldEnd, d.newLines], [1, 3, ['x', 'y']]);
 });
+
+/* ---------- Beat document data ---------- */
+const BD = require('../src/core/beatdoc.js');
+const beatFile = (body, settings) => body + (body.endsWith('\n') ? '' : '\n') + BD.START + ' ' + JSON.stringify(settings) + ' ' + BD.END;
+t('beat block: read and write back unchanged keys', () => {
+  const body = 'INT. HOUSE - DAY\n\nMae runs.\n';
+  const st = { 'Revision': { Addition: [[18, 4, 1]], Removed: [], RemovalSuggestion: [] }, 'CharacterData': { MAE: { color: 'red' } }, 'Stylesheet': 'Screenplay', 'Text Length': 999 };
+  const r = BD.read(beatFile(body, st));
+  assert.strictEqual(r.body, body);
+  assert.deepStrictEqual(r.settings.CharacterData, { MAE: { color: 'red' } });
+  const out = BD.write(r.body, r.settings, [], null);
+  const back = BD.read(out);
+  assert.strictEqual(back.body, body);
+  assert.strictEqual(back.settings['Text Length'], body.length, 'text length is refreshed');
+  assert.strictEqual(back.settings.Stylesheet, 'Screenplay');
+  assert.ok(out.startsWith(body + BD.START));
+});
+t('beat block: no trailing newline gets one, like Beat', () => {
+  const out = BD.write('Hello', { a: 1 }, [], null);
+  assert.ok(out.startsWith('Hello\n' + BD.START));
+  assert.strictEqual(BD.read(out).settings['Text Length'], 5);
+  assert.strictEqual(BD.write('Plain script\n', null, [], null), 'Plain script\n', 'no block when there is no data');
+});
+t('beat block: unreadable JSON is kept verbatim', () => {
+  const bad = 'Hi\n' + BD.START + ' {oops ' + BD.END;
+  const r = BD.read(bad);
+  assert.strictEqual(r.settings, null);
+  assert.strictEqual(BD.write(r.body, null, [], r.raw), bad);
+});
+t('beat block: CRLF files', () => {
+  const r = BD.read('INT. A\r\n\r\nHi.\r\n' + BD.START + ' {"x":1} ' + BD.END);
+  assert.strictEqual(r.body, 'INT. A\n\nHi.\n');
+});
+t('revisions: legacy colors, out-of-range, saving merges', () => {
+  const revs = BD.revisionsFromSettings({ Addition: [[0, 3, 'orange'], [2, 2, 2], [8, 50, 0]], Removal: [[5, 1]] }, 10);
+  assert.deepStrictEqual(revs.map(r => [r.from, r.to, r.type, r.gen]), [[0, 3, 'Addition', 1], [2, 4, 'Addition', 2], [5, 6, 'RemovalSuggestion', 0]]);
+  const saved = BD.revisionsForSaving([
+    { from: 0, to: 3, type: 'Addition', gen: 0, seq: 1 }, { from: 3, to: 6, type: 'Addition', gen: 0, seq: 2 },
+    { from: 4, to: 5, type: 'Addition', gen: 3, seq: 3 }, { from: 9, to: 11, type: 'RemovalSuggestion', gen: 1, seq: 4 }]);
+  assert.deepStrictEqual(saved, { Addition: [[0, 4, 0], [4, 1, 3], [5, 1, 0]], Removed: [], RemovalSuggestion: [[9, 2, 1]] });
+  assert.deepStrictEqual(BD.revisionsForSaving([]), {});
+});
+t('reviews and tags round trip', () => {
+  const rv = BD.reviewsFromSettings([{ range: [2, 3], string: 'tighten' }, { range: [40, 3], string: 'x' }], 20);
+  assert.deepStrictEqual(rv, [{ from: 2, to: 5, text: 'tighten' }]);
+  assert.deepStrictEqual(BD.reviewsForSaving(rv.map((r, k) => Object.assign({ seq: k }, r))), [{ range: [2, 3], string: 'tighten' }]);
+  const tg = BD.tagsFromSettings([{ range: [0, 3], type: 'prop', definition: 'A1' }], [{ name: 'Gun', type: 'prop', id: 'A1' }, { name: 'Unused', type: 'cast', id: 'B2' }], 10);
+  assert.deepStrictEqual(tg[0].def, { name: 'Gun', type: 'prop', id: 'A1' });
+  const saved = BD.tagsForSaving(tg.map(x => Object.assign({ seq: 1 }, x)));
+  assert.deepStrictEqual(saved, { tags: [{ range: [0, 3], type: 'prop', definition: 'A1' }], defs: [{ name: 'Gun', type: 'prop', id: 'A1' }] });
+});
+t('line alternatives are hidden and put back', () => {
+  const alt = BD.ALT_PREFIX + JSON.stringify({ current: 1, versions: [{ text: 'Old line.', revisions: {} }, { text: 'New line.', revisions: { 0: [[0, 3]] } }] }) + ' */';
+  const r = BD.read('INT. A\n\nNew line.' + alt + '\nMore.\n');
+  assert.strictEqual(r.body, 'INT. A\n\nNew line.\nMore.\n');
+  assert.deepStrictEqual(r.alts, [{ line: 2, raw: alt }]);
+  assert.strictEqual(BD.parseAlternative(alt).versions[0].text, 'Old line.');
+  const out = BD.write(r.body, { k: 1 }, r.alts, null);
+  assert.ok(out.includes('New line.' + alt + '\nMore.'));
+  assert.strictEqual(BD.read(out).settings['Text Length'], ('INT. A\n\nNew line.' + alt + '\nMore.\n').length, 'Beat counts the alternatives in the length');
+});
+t('heading identifiers stay with their scenes', () => {
+  const old = [{ uuid: 'U1', string: 'INT. A' }, { uuid: 'U2', string: 'INT. B' }, { uuid: 'U3', string: 'INT. C' }];
+  let n = 0;
+  const out = BD.headingUUIDs(old, ['INT. A', 'INT. NEW', 'int. b', 'INT. C'], () => 'N' + (++n));
+  assert.deepStrictEqual(out.map(o => o.uuid), ['U1', 'N1', 'U2', 'U3']);
+});
+t('macros', () => {
+  const P = new BD.MacroParser(new Date(2026, 10, 5));
+  assert.strictEqual(P.apply('{{ hero = Mae Ellis }}'), 'Mae Ellis');
+  assert.strictEqual(P.apply('Enter {{HERO}}.'), 'Enter Mae Ellis.');
+  assert.strictEqual(P.apply('{{serial shot}} {{serial shot}} {{shot}}'), '1 2 3');
+  assert.strictEqual(P.apply('{{serial page = 10 + 2}} {{page}}'), '12 13');
+  assert.strictEqual(P.apply('{{page.sub}} {{page.sub}} {{page}} {{page.sub}}'), '1 2 14 1');
+  assert.strictEqual(P.apply('{{panel}} {{panel}}'), '1 2');
+  assert.strictEqual(P.apply('{{date}} | {{date dd/MM/yyyy}} | {{date = MMMM d, y}}'), '5.11.2026 | 05/11/2026 | November 5, 2026');
+  assert.strictEqual(P.apply('a{{ref First}} b{{ref Second}}\n{{references}}'), 'a[1] b[2]\n[1] First\n[2] Second');
+  assert.strictEqual(BD.evalNumber('2*(3+4)'), 14);
+  const parsed = F.parse('Title: Draft {{serial d = 3}}\n\n# One\n\nShot {{panel}}. {{panel}}.\n\n# Two\n\nShot {{panel}}.\n');
+  const m = BD.resolveMacros(parsed);
+  assert.strictEqual(m.title.get(0), 'Draft 3');
+  assert.deepStrictEqual([...m.lines.values()], ['Shot 1. 2.', 'Shot 1.']);
+});
+t('document settings override print options', () => {
+  assert.deepStrictEqual(BD.printOverrides({ 'Page Size': 0, 'Print Scene Numbers': false, 'firstPageNumber': 4 }), { paper: 'a4', sceneNumbers: false, firstPageNumber: 4 });
+  assert.deepStrictEqual(BD.printOverrides({ 'Page Size': 1 }), { paper: 'letter' });
+  assert.strictEqual(BD.sceneStart({ 'Scene Numbering Starts From': 7 }), 7);
+  assert.strictEqual(BD.sceneStart(null), 1);
+});
+t('print: highlights, macros, revision marks, page numbers', () => {
+  const src = 'INT. HOUSE - DAY\n\nShe opens the +red door+ slowly.\n\nScene {{serial n}} and {{n}}.\n';
+  const parsed = F.parse(src);
+  const revs = new Map([[2, Int8Array.from(src.split('\n')[2], (c, k) => (k >= 9 && k < 14 ? 1 : -1))]]);
+  const res = P.paginate(parsed, { revisions: revs, firstPageNumber: 3 });
+  const html = P.renderHTML(parsed, res);
+  assert.ok(html.includes('<mark>red door</mark>'), 'highlight prints');
+  assert.ok(html.includes('Scene 1 and 2.'), 'macros resolve when printing');
+  assert.ok(html.includes('<span class="rvm">**</span>'), 'pink revision mark in the margin');
+  assert.strictEqual((html.match(/class="rvm"/g) || []).length, 1, 'only the revised line is marked');
+  assert.ok(html.includes('<div class="pnum">3.</div>'), 'numbering starts at the first page number');
+  assert.ok(!P.renderHTML(parsed, P.paginate(parsed, { hidePageNumbers: true, firstPageNumber: 3 })).includes('pnum'));
+});
+t('scene numbering can start later', () => {
+  const p = F.parse('INT. A\n\nINT. B #9#\n\nINT. C\n', { sceneStart: 20 });
+  assert.deepStrictEqual(p.lines.filter(l => l.type === 'heading').map(l => l.sceneNumber), ['20', '9', '10']);
+});
+t('moving scenes reports where each line came from', () => {
+  const r = S.moveScenes(ACTS, [lineOf(ACTS, 'INT. B - DAY')], lineOf(ACTS, 'INT. A - DAY'));
+  const oldL = ACTS.split('\n'), newL = r.text.split('\n');
+  assert.strictEqual(r.origin.length, newL.length);
+  r.origin.forEach((o, k) => { if (o >= 0) assert.strictEqual(newL[k], oldL[o]); else assert.strictEqual(newL[k], ''); });
+});
 console.log(`${passed} tests passed${process.exitCode ? ', with failures' : ''}`);

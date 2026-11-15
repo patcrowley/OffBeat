@@ -186,6 +186,16 @@ Lines starting with # are sections (## and ### for sub-sections). They organize 
 
 Three equals signs force a page break.
 
+INT. BEAT EXTRAS - DAY
+
+These work the same way in Beat, so a script can go back and forth between Beat and Offbeat.
+
+Wrap words in plus signs to +highlight them+. Highlights print with a yellow background.
+
+Macros are words in double braces that fill themselves in when you print. Define one with {{hero = Mae Ellis}} and use it as {{hero}}. Number shots with {{serial shot}} (it counts up each time), print today's date with {{date}} or {{date d MMMM yyyy}}, and number comic panels with {{panel}}.
+
+The Review menu marks revisions in color (turn on Revision Mode with F8 and everything you type is marked), adds review notes to selected text (Ctrl+Shift+R), tags props, costumes and cast for a breakdown, and keeps alternative versions of a line (Alt+Up and Alt+Down switch between them). Revised lines get the industry-standard asterisks in the margin when you print. Review → Document Settings keeps page size and scene numbering inside the script.
+
 INT. SHORTCUTS - DAY
 
 Enter after dialogue or action adds a blank line automatically; Shift+Enter adds a single line break. Ctrl+G jumps to any scene. Ctrl+E toggles the print preview. Ctrl+Shift+K opens the index cards — drag them to reorder scenes.

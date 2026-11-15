@@ -45,7 +45,7 @@
         for (let k = e - open; k < e; k++) st[k] += ' markup';
       }
     };
-    const masked = text.replace(/\\[*_]/g, '  ');
+    const masked = text.replace(/\\[*_+]/g, '  ');
     const run = (re, cls, open) => {
       re.lastIndex = 0; let m;
       while ((m = re.exec(masked))) {
@@ -63,8 +63,10 @@
     run(/(?<!\*)\*\*(?=[^\s*])(.+?)(?<=[^\s*])\*\*(?!\*)/g, 'strong', 2);
     run(/(?<!\*)\*(?=[^\s*])(.+?)(?<=[^\s*])\*(?!\*)/g, 'em', 1);
     run(/_(?=\S)(.+?)(?<=\S)_/g, 'underline', 1);
+    run(/\+(?=\S)(.+?)(?<=\S)\+/g, 'highlight', 1);   // Beat's +highlight+
+    run(/\{\{.*?\}\}/g, 'macro', 2);                     // Beat's {{macros}}
     // escapes
-    for (let k = 0; k < n - 1; k++) if (text[k] === '\\' && /[*_]/.test(text[k + 1]) && !/boneyard|note/.test(st[k])) st[k] = 'markup';
+    for (let k = 0; k < n - 1; k++) if (text[k] === '\\' && /[*_+]/.test(text[k + 1]) && !/boneyard|note/.test(st[k])) st[k] = 'markup';
 
     // pass 3: element markup characters
     const lead = text.match(/^\s*/)[0].length;

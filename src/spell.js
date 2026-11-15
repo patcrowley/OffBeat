@@ -9,7 +9,8 @@
   const WORD_RE = /[\p{L}\p{N}]+(?:['’][\p{L}]+)*/gu;
   const cache = new Map();       // word -> true (ok) | false (misspelled)
   const pending = new Set();
-  const ignored = new Set();     // "Ignore in this script" (lowercased)
+  const fallbackIgnored = new Set();
+  const ignoredSet = () => (App.active && App.active.ignored) || fallbackIgnored;   // "Ignore in this script" (lowercased), per tab
   let names = new Set();         // words from character cues, ignored automatically
   let enabled = true;
   let overlayOn = false;
@@ -48,7 +49,7 @@
   function status(word) {
     const n = norm(word);
     const low = n.toLowerCase();
-    if (ignored.has(low) || names.has(n.toUpperCase())) return true;
+    if (ignoredSet().has(low) || names.has(n.toUpperCase())) return true;
     const c = cache.get(n);
     if (c === undefined) { pending.add(n); scheduleCheck(); return true; }
     return c;
@@ -149,7 +150,7 @@
     } else if (res.action === 'add') {
       await host.spellAdd(norm(w.word));
     } else if (res.action === 'ignore') {
-      ignored.add(norm(w.word).toLowerCase()); refresh();
+      ignoredSet().add(norm(w.word).toLowerCase()); refresh();
     }
     cm.focus();
   }, true);
@@ -248,7 +249,7 @@
       if (!cur) return;
       const to = ($('sp-to') || {}).value;
       if (what === 'skip') { skipped.add(`${cur.line}:${cur.ch}:${cur.word}`); from = { line: cur.line, ch: cur.end }; }
-      else if (what === 'ignore') { ignored.add(norm(cur.word).toLowerCase()); refresh(); from = { line: cur.line, ch: cur.end }; }
+      else if (what === 'ignore') { ignoredSet().add(norm(cur.word).toLowerCase()); refresh(); from = { line: cur.line, ch: cur.end }; }
       else if (what === 'add') { await host.spellAdd(norm(cur.word)); cache.set(norm(cur.word), true); from = { line: cur.line, ch: cur.end }; }
       else if (what === 'change' && to) {
         cm.replaceRange(to, { line: cur.line, ch: cur.ch }, { line: cur.line, ch: cur.end }, '+spell');
@@ -269,5 +270,6 @@
 
   App.viewCommands = App.viewCommands || {};
   App.viewCommands.spelling = reviewDialog;
-  window.Spell = { status, refresh, checkAll, occurrences, ignored, cache, setEnabled, get enabled() { return enabled; } };
+  App.on('tabswitch', () => refresh());
+  window.Spell = { status, refresh, checkAll, occurrences, cache, setEnabled, get ignored() { return ignoredSet(); }, get enabled() { return enabled; } };
 })();

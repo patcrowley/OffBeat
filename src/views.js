@@ -767,6 +767,13 @@
 
   /* ---------- Wiring ---------- */
   App.on('parse', () => { state.current = App.currentScene(); renderOutline(); if (state.cards) renderCards(); });
+  // Switching scripts: finish what was going on in the old one first.
+  App.on('beforetabswitch', () => {
+    if (state.editing) commitEdit();
+    if (!$('modal-backdrop').hidden) closeModal();
+    $('popover').hidden = true;
+    state.selected = new Set(); state.anchor = null;
+  });
   App.on('paginate', () => { renderOutline(); if (state.cards) renderCards(); if (state.timeline) renderTimeline(); if (state.preview) renderPreview(); });
   App.on('cursor', (sc) => { if ((sc && sc.line) !== (state.current && state.current.line)) { state.current = sc; markCurrent(); } });
   let firstPrefs = true;

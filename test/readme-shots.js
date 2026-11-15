@@ -16,6 +16,8 @@ module.exports = async ({ win }) => {
   win.setSize(1280, 800); win.focus();
   const ignoreNames = () => js(`Spell.ignored.add('orpheum'); Spell.ignored.add('okafor'); Spell.refresh()`);   // the sample's invented names
   await js(`host.setPref('autosave', false); App.setDocument(Samples.sample, null, 'The Last Reel.fountain')`); await sleep(1500);
+  await js(`cmd('help')`); await sleep(800);                                   // a second script, so the tab bar shows
+  await js(`App.activateTab(App.tabs[0].id)`); await sleep(600);
   await ignoreNames(); await sleep(300);
 
   // 1. Writing: editor + outline
@@ -39,7 +41,7 @@ module.exports = async ({ win }) => {
   await shot('card-edit.png');
   await js(`document.querySelector('.card.editing .c-edit-syn') && document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}))`);
   await reset();
-  await js(`App.setDocument(Samples.sample, null, 'The Last Reel.fountain')`); await sleep(800);
+  await js(`App.setDocument(Samples.sample, null, 'The Last Reel.fountain')`); await sleep(800); await ignoreNames();
 
   // 4. Dark mode, print preview and timeline
   nativeTheme.themeSource = 'dark'; await sleep(500);
@@ -59,7 +61,7 @@ module.exports = async ({ win }) => {
   await js(`cmd('spelling')`); await sleep(900);
   await shot('spelling.png');
   await reset();
-  await js(`App.setDocument(Samples.sample, null, 'The Last Reel.fountain')`); await sleep(800);
+  await js(`App.setDocument(Samples.sample, null, 'The Last Reel.fountain')`); await sleep(800); await ignoreNames();
 
   // 7. Accessibility: 150% interface with Atkinson Hyperlegible Mono
   await js(`host.setPref('uiScale', 1.5); host.setPref('editorFont', 'atkinson')`); await sleep(1500);

@@ -45,7 +45,8 @@ const DEFAULT_PREFS = {
   editorFont: 'courier-prime',
   print: { paper: 'letter', sceneNumbers: true, boldHeadings: true, underlineHeadings: false, spaceBeforeHeading: 2, font: 'courier-prime' },
   recent: [],
-  session: [],              // scripts open at last quit
+  session: [],              // scripts open at last quit (one tab each)
+  sessionActive: null,      // the tab that was showing
   positions: {},            // path -> { line, ch, offset } so each script reopens where you left off
   bounds: null
 };
@@ -70,7 +71,27 @@ function setPref(key, value) {
 }
 
 /* ---------------- Documents / windows ---------------- */
-const docs = new Map(); // window id -> { path, dirty, kind }
+// Each window holds one or more scripts, shown as tabs.
+// docs: window id -> { tabs: Map(tabId -> { id, path, dirty, pos }), order: [tabId], active: tabId, closing }
+// rec.path / rec.dirty describe the tab that's showing.
+const docs = new Map();
+let tabSeq = 0;
+function newRecord() {
+  return {
+    tabs: new Map(), order: [], active: null, closing: false, lastClosedPath: null,
+    get tab() { return this.tabs.get(this.active) || null; },
+    get path() { const t = this.tab; return t ? t.path : null; },
+    get dirty() { const t = this.tab; return t ? t.dirty : false; },
+    set dirty(v) { const t = this.tab; if (t) t.dirty = v; }
+  };
+}
+function tabPaths(rec) { return rec.order.map(id => rec.tabs.get(id)).filter(t => t && t.path).map(t => t.path); }
+function untitledName(rec) {
+  const used = new Set([...rec.tabs.values()].map(t => t.name));
+  if (!used.has('Untitled')) return 'Untitled';
+  let n = 2; while (used.has('Untitled ' + n)) n++;
+  return 'Untitled ' + n;
+}
 const pendingReplies = new Map();
 let replyId = 0;
 
@@ -96,22 +117,47 @@ function rememberPosition(d) {
   for (const k of keys.slice(0, Math.max(0, keys.length - 50))) delete prefs.positions[k];
 }
 function openPaths(exceptId) {
-  return BrowserWindow.getAllWindows()
-    .filter(w => !w.isDestroyed() && w.id !== exceptId && docs.has(w.id) && docs.get(w.id).path)
-    .map(w => docs.get(w.id).path);
+  const out = [];
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (w.isDestroyed() || w.id === exceptId || !docs.has(w.id)) continue;
+    for (const p of tabPaths(docs.get(w.id))) if (!out.includes(p)) out.push(p);
+  }
+  return out;
 }
 app.on('before-quit', () => {
   if (quitting) return;
   quitting = true;
-  for (const d of docs.values()) rememberPosition(d);
+  for (const rec of docs.values()) for (const t of rec.tabs.values()) rememberPosition(t);
   const open = openPaths();
-  if (open.length) prefs.session = open;
+  if (open.length) {
+    prefs.session = open;
+    const fw = focusedWin(); const rec = fw && docs.get(fw.id);
+    prefs.sessionActive = rec && rec.path ? rec.path : null;
+  }
   savePrefs();
 });
-ipcMain.on('position', (e, pos) => {
+function tabFrom(e, tabId) {
   const win = BrowserWindow.fromWebContents(e.sender);
-  const d = win && docs.get(win.id);
-  if (d && d.path) d.pos = pos;
+  const rec = win && docs.get(win.id);
+  if (!rec) return {};
+  return { win, rec, tab: rec.tabs.get(tabId != null ? tabId : rec.active) };
+}
+ipcMain.on('position', (e, msg) => {
+  const { tab } = tabFrom(e, msg && msg.tabId);
+  if (tab && tab.path) tab.pos = msg && msg.pos ? msg.pos : msg;
+});
+// The window's tabs as the editor shows them.
+ipcMain.on('tab-activated', (e, tabId) => {
+  const { win, rec } = tabFrom(e);
+  if (rec && rec.tabs.has(tabId)) { rec.active = tabId; updateTitle(win); }
+});
+ipcMain.on('tabs-order', (e, ids) => {
+  const { rec } = tabFrom(e);
+  if (rec && Array.isArray(ids)) rec.order = ids.filter(id => rec.tabs.has(id)).concat(rec.order.filter(id => !ids.includes(id)));
+});
+ipcMain.on('tab-info', (e, { tabId, path: p, name }) => {
+  const { win, tab } = tabFrom(e, tabId);
+  if (tab) { tab.path = p || null; tab.name = name || tab.name; updateTitle(win); }
 });
 
 function askRenderer(win, channel, payload) {
@@ -127,7 +173,9 @@ ipcMain.on('reply', (e, { id, value }) => {
   if (r) { pendingReplies.delete(id); r(value); }
 });
 
-function createWindow(filePath, initialText) {
+function createWindow(files, opts) {
+  opts = opts || {};
+  const filePaths = (Array.isArray(files) ? files : files ? [files] : []);
   const b = prefs.bounds || { width: 1280, height: 860 };
   const win = new BrowserWindow({
     width: b.width, height: b.height,
@@ -145,15 +193,21 @@ function createWindow(filePath, initialText) {
       spellcheck: false
     }
   });
-  docs.set(win.id, { path: filePath || null, dirty: false });
+  docs.set(win.id, newRecord());
   win.loadFile(path.join(__dirname, 'src', 'index.html'));
   win.once('ready-to-show', () => win.show());
 
-  win.webContents.on('did-finish-load', () => {
+  win.webContents.on('did-finish-load', async () => {
     applyScale(win);
     win.webContents.send('prefs', prefs);
-    if (filePath) loadInto(win, filePath);
-    else win.webContents.send('load', { text: initialText || '', path: null, name: 'Untitled' });
+    const rec = docs.get(win.id);
+    if (rec && rec.tabs.size) return;   // a reload: keep what's there
+    for (const p of filePaths) await loadInto(win, p, { reuse: false });
+    if (!rec.tabs.size) newTab(win, opts.text, opts.name);
+    if (opts.activePath) {
+      const t = [...rec.tabs.values()].find(x => x.path === opts.activePath);
+      if (t) win.webContents.send('activate-tab', { tabId: t.id });
+    }
     updateTitle(win);
   });
 
@@ -166,34 +220,31 @@ function createWindow(filePath, initialText) {
   });
 
   win.on('close', async (e) => {
-    const d = docs.get(win.id);
-    if (!d || !d.dirty || d.closing) return;
+    const rec = docs.get(win.id);
+    if (!rec || rec.closing) return;
+    const dirtyTabs = rec.order.map(id => rec.tabs.get(id)).filter(t => t && t.dirty);
+    if (!dirtyTabs.length) return;
     e.preventDefault();
-    // With autosave on, a script that has a file is simply saved on the way out.
-    if (prefs.autosave && d.path && await saveDoc(win, false, { auto: true })) { d.closing = true; win.close(); return; }
-    const r = await dialog.showMessageBox(win, {
-      type: 'warning', buttons: ['Save', "Don't Save", 'Cancel'], defaultId: 0, cancelId: 2,
-      message: `Do you want to save the changes you made to ${d.path ? path.basename(d.path) : 'Untitled'}?`,
-      detail: "Your changes will be lost if you don't save them."
-    });
-    if (r.response === 2) return;
-    if (r.response === 0) {
-      const ok = await saveDoc(win, false);
-      if (!ok) return;
-    }
-    d.closing = true;
-    win.close();
+    if (rec.resolving) return;
+    rec.resolving = true;
+    try {
+      for (const t of dirtyTabs) if (!(await resolveDirtyTab(win, t))) return;   // Cancel keeps the window open
+      rec.closing = true;
+      win.close();
+    } finally { rec.resolving = false; }
   });
   const winId = win.id;
   win.on('closed', () => {
-    const d = docs.get(winId);
+    const rec = docs.get(winId);
     docs.delete(winId);
-    if (quitting || !d) return;
-    rememberPosition(d);
-    // Closing the last window ends the session: remember that script for next time.
+    if (quitting || !rec) return;
+    for (const t of rec.tabs.values()) rememberPosition(t);
+    // Closing the last window ends the session: remember its scripts for next time.
     const others = openPaths(winId);
+    const mine = tabPaths(rec);
     if (others.length) prefs.session = others;
-    else if (d.path) prefs.session = [d.path];
+    else if (mine.length) { prefs.session = mine; prefs.sessionActive = rec.path; }
+    else if (rec.lastClosedPath) { prefs.session = [rec.lastClosedPath]; prefs.sessionActive = rec.lastClosedPath; }
     else if (BrowserWindow.getAllWindows().length > 0) prefs.session = [];
     savePrefs();
   });
@@ -204,11 +255,55 @@ function createWindow(filePath, initialText) {
 }
 
 function updateTitle(win) {
-  const d = docs.get(win.id);
-  if (!d) return;
-  const name = d.path ? path.basename(d.path) : 'Untitled';
-  win.setTitle(`${d.dirty ? '• ' : ''}${name} — Offbeat`);
-  if (isMac) { win.setDocumentEdited(d.dirty); if (d.path) win.setRepresentedFilename(d.path); }
+  const rec = win && !win.isDestroyed() && docs.get(win.id);
+  if (!rec || !rec.tab) return;
+  const t = rec.tab;
+  const name = t.path ? path.basename(t.path) : (t.name || 'Untitled');
+  win.setTitle(`${t.dirty ? '• ' : ''}${name} — Offbeat`);
+  if (isMac) { win.setDocumentEdited(t.dirty); if (t.path) win.setRepresentedFilename(t.path); }
+}
+
+/* A new, empty (or given) script in its own tab. */
+function newTab(win, text, name) {
+  const rec = docs.get(win.id); if (!rec) return null;
+  const id = ++tabSeq;
+  const t = { id, path: null, dirty: false, pos: null, name: name || untitledName(rec) };
+  rec.tabs.set(id, t); rec.order.push(id); rec.active = id;
+  win.webContents.send('load', { tabId: id, text: text || '', path: null, name: t.name });
+  updateTitle(win);
+  return id;
+}
+
+/* Ask about one unsaved tab. Returns false if the person chose Cancel. */
+async function resolveDirtyTab(win, t) {
+  if (!t || !t.dirty) return true;
+  if (prefs.autosave && t.path && await saveDoc(win, false, { auto: true, tabId: t.id })) return true;
+  win.webContents.send('activate-tab', { tabId: t.id });
+  const r = await dialog.showMessageBox(win, {
+    type: 'warning', buttons: ['Save', "Don't Save", 'Cancel'], defaultId: 0, cancelId: 2,
+    message: `Do you want to save the changes you made to ${t.path ? path.basename(t.path) : (t.name || 'Untitled')}?`,
+    detail: "Your changes will be lost if you don't save them."
+  });
+  if (r.response === 2) return false;
+  if (r.response === 0) return saveDoc(win, false, { tabId: t.id });
+  return true;
+}
+
+async function closeTab(win, tabId) {
+  const rec = win && docs.get(win.id); if (!rec) return;
+  const t = rec.tabs.get(tabId != null ? tabId : rec.active); if (!t) return;
+  if (!(await resolveDirtyTab(win, t))) return;
+  rememberPosition(t); savePrefs();
+  if (t.path) rec.lastClosedPath = t.path;
+  rec.tabs.delete(t.id);
+  rec.order = rec.order.filter(id => id !== t.id);
+  if (rec.active === t.id) rec.active = rec.order[0] || null;
+  if (!rec.tabs.size) { rec.closing = true; win.close(); return; }   // last tab closes the window
+  win.webContents.send('remove-tab', { tabId: t.id });
+}
+async function closeOtherTabs(win, keepId) {
+  const rec = win && docs.get(win.id); if (!rec) return;
+  for (const id of rec.order.slice()) if (id !== keepId) { await closeTab(win, id); if (rec.tabs.has(id)) return; }
 }
 
 function addRecent(p) {
@@ -219,41 +314,48 @@ function addRecent(p) {
   buildMenu();
 }
 
-async function loadInto(win, filePath) {
-  try {
-    let text = fs.readFileSync(filePath, 'utf8');
-    const d = docs.get(win.id);
-    if (/\.fdx$/i.test(filePath)) {
-      win.webContents.send('import-fdx', { xml: text, name: path.basename(filePath, path.extname(filePath)) });
-      d.path = null; d.dirty = true;
-    } else {
-      d.path = filePath; d.dirty = false; d.pos = null;
-      win.webContents.send('load', { text, path: filePath, name: path.basename(filePath), pos: prefs.positions[filePath] || null });
-      addRecent(filePath);
-    }
-    updateTitle(win);
-  } catch (err) {
-    dialog.showErrorBox('Could not open file', String(err.message || err));
+/* Open a file in a tab of this window (or switch to it if it's already open here).
+   An empty, untouched Untitled tab is reused instead of left behind. Returns the tab id. */
+async function loadInto(win, filePath, opts) {
+  opts = opts || {};
+  const rec = docs.get(win.id); if (!rec) return null;
+  let text;
+  try { text = fs.readFileSync(filePath, 'utf8'); }
+  catch (err) { dialog.showErrorBox('Could not open file', String(err.message || err)); return null; }
+  const isFdx = /\.fdx$/i.test(filePath);
+  if (!isFdx) for (const t of rec.tabs.values()) if (t.path === filePath) { win.webContents.send('activate-tab', { tabId: t.id }); return t.id; }
+  let tabId = null;
+  const a = rec.tab;
+  if (opts.reuse !== false && a && !a.path && !a.dirty && await askRenderer(win, 'request-is-empty', { tabId: a.id })) tabId = a.id;
+  const replace = tabId != null;
+  if (!replace) tabId = ++tabSeq;
+  const name = isFdx ? path.basename(filePath, path.extname(filePath)) + ' (imported)' : path.basename(filePath);
+  rec.tabs.set(tabId, { id: tabId, path: isFdx ? null : filePath, dirty: isFdx, pos: null, name });
+  if (!replace) rec.order.push(tabId);
+  rec.active = tabId;
+  if (isFdx) win.webContents.send('import-fdx', { tabId, xml: text, name: path.basename(filePath, path.extname(filePath)), replace });
+  else {
+    win.webContents.send('load', { tabId, text, path: filePath, name, pos: prefs.positions[filePath] || null, replace });
+    addRecent(filePath);
   }
+  updateTitle(win);
+  return tabId;
 }
 
 function focusedWin() { return BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0]; }
 
 async function openFile(p) {
-  // reuse an empty untitled window if available
-  const win = focusedWin();
-  if (win && docs.has(win.id)) {
-    const d = docs.get(win.id);
-    if (!d.path && !d.dirty) {
-      const empty = await askRenderer(win, 'request-is-empty');
-      if (empty) { loadInto(win, p); return; }
+  // already open somewhere? show that tab
+  for (const w of BrowserWindow.getAllWindows()) {
+    const rec = docs.get(w.id); if (!rec) continue;
+    for (const t of rec.tabs.values()) if (t.path === p) {
+      if (w.isMinimized()) w.restore();
+      w.focus(); w.webContents.send('activate-tab', { tabId: t.id }); return;
     }
   }
-  for (const w of BrowserWindow.getAllWindows()) {
-    const d = docs.get(w.id);
-    if (d && d.path === p) { w.focus(); return; }
-  }
-  createWindow(p);
+  const win = focusedWin();
+  if (win && docs.has(win.id)) { if (win.isMinimized()) win.restore(); win.focus(); await loadInto(win, p); }
+  else createWindow([p]);
 }
 
 async function openDialog() {
@@ -286,11 +388,14 @@ function backup(filePath, auto) {
 
 async function saveDoc(win, saveAs, opts) {
   const auto = !!(opts && opts.auto);
-  const d = docs.get(win.id);
+  const rec = docs.get(win.id);
+  if (!rec) return false;
+  const d = rec.tabs.get(opts && opts.tabId != null ? opts.tabId : rec.active);
   if (!d) return false;
   let target = d.path;
   if (saveAs || !target) {
-    const suggested = await askRenderer(win, 'request-suggested-name');
+    if (opts && opts.tabId != null) win.webContents.send('activate-tab', { tabId: d.id });
+    const suggested = await askRenderer(win, 'request-suggested-name', { tabId: d.id });
     const r = await dialog.showSaveDialog(win, {
       defaultPath: target || path.join(app.getPath('documents'), (suggested || 'Untitled') + '.fountain'),
       filters: [{ name: 'Fountain', extensions: ['fountain'] }, { name: 'Text', extensions: ['txt'] }]
@@ -298,17 +403,17 @@ async function saveDoc(win, saveAs, opts) {
     if (r.canceled || !r.filePath) return false;
     target = r.filePath;
   }
-  const text = await askRenderer(win, 'request-text');
+  const text = await askRenderer(win, 'request-text', { tabId: d.id });
   if (text === null) { dialog.showErrorBox('Save failed', 'Could not read the document.'); return false; }
   try {
     backup(target, auto);
     const tmp = target + '.offbeat-tmp';
     fs.writeFileSync(tmp, text, 'utf8');
     fs.renameSync(tmp, target);
-    d.path = target; d.dirty = false;
+    d.path = target; d.dirty = false; d.name = path.basename(target);
     updateTitle(win);
     addRecent(target);
-    win.webContents.send('saved', { path: target, name: path.basename(target), auto });
+    win.webContents.send('saved', { tabId: d.id, path: target, name: path.basename(target), auto });
     return true;
   } catch (err) {
     dialog.showErrorBox('Save failed', String(err.message || err));
@@ -378,20 +483,19 @@ async function importFDX() {
 }
 
 /* ---------------- IPC ---------------- */
-ipcMain.on('dirty', (e, dirty) => {
-  const win = BrowserWindow.fromWebContents(e.sender);
-  const d = win && docs.get(win.id);
-  if (d && d.dirty !== dirty) { d.dirty = dirty; updateTitle(win); }
+ipcMain.on('dirty', (e, msg) => {
+  const m = typeof msg === 'object' && msg ? msg : { dirty: msg };
+  const { win, tab } = tabFrom(e, m.tabId);
+  if (tab && tab.dirty !== m.dirty) { tab.dirty = !!m.dirty; updateTitle(win); }
 });
 ipcMain.on('set-pref', (e, { key, value }) => setPref(key, value));
 ipcMain.on('menu-action', (e, action) => {
   const win = BrowserWindow.fromWebContents(e.sender);
   runAction(action, win);
 });
-ipcMain.handle('autosave', async (e) => {
-  const win = BrowserWindow.fromWebContents(e.sender);
-  const d = win && docs.get(win.id);
-  if (d && d.path && d.dirty) return saveDoc(win, false, { auto: true });
+ipcMain.handle('autosave', async (e, tabId) => {
+  const { win, tab } = tabFrom(e, tabId);
+  if (tab && tab.path && tab.dirty) return saveDoc(win, false, { auto: true, tabId: tab.id });
   return false;
 });
 /* ---------------- Spelling ---------------- */
@@ -477,7 +581,10 @@ ipcMain.handle('font-url', () => 'file://' + path.join(__dirname, 'node_modules'
 function runAction(action, win) {
   win = win || focusedWin();
   switch (action) {
-    case 'new': createWindow(); break;
+    case 'new': if (win && docs.has(win.id)) newTab(win); else createWindow(); break;
+    case 'new-window': createWindow(); break;
+    case 'close-tab': if (win) closeTab(win); break;
+    case 'close-window': if (win) win.close(); break;
     case 'open': openDialog(); break;
     case 'save': if (win) saveDoc(win, false); break;
     case 'save-as': if (win) saveDoc(win, true); break;
@@ -490,7 +597,10 @@ function runAction(action, win) {
       const dir = path.join(app.getPath('userData'), 'Backups');
       fs.mkdirSync(dir, { recursive: true }); shell.openPath(dir); break;
     }
-    default: if (win) win.webContents.send('command', action);
+    default:
+      if (win && /^close-tab:\d+$/.test(action)) closeTab(win, +action.split(':')[1]);
+      else if (win && /^close-others:\d+$/.test(action)) closeOtherTabs(win, +action.split(':')[1]);
+      else if (win) win.webContents.send('command', action);
   }
 }
 
@@ -508,7 +618,8 @@ function buildMenu() {
     ...(isMac ? [{ role: 'appMenu' }] : []),
     {
       label: '&File', submenu: [
-        act('New', 'new', 'CmdOrCtrl+N'),
+        act('New Script', 'new', 'CmdOrCtrl+N'),
+        act('New Window', 'new-window'),
         act('Open…', 'open', 'CmdOrCtrl+O'),
         { label: 'Open Recent', submenu: prefs.recent.length ? [
           ...prefs.recent.map(p => ({ label: p, click: () => openFile(p) })),
@@ -528,7 +639,8 @@ function buildMenu() {
         ] },
         act('Print…', 'print', 'CmdOrCtrl+P'),
         { type: 'separator' },
-        { role: isMac ? 'close' : 'close', label: 'Close Window', accelerator: 'CmdOrCtrl+W' },
+        act('Close Tab', 'close-tab', 'CmdOrCtrl+W'),
+        act('Close Window', 'close-window', 'CmdOrCtrl+Shift+W'),
         ...(isMac ? [] : [{ type: 'separator' }, { role: 'quit', label: 'Exit' }])
       ]
     },
@@ -585,6 +697,9 @@ function buildMenu() {
         act('Timeline', 'toggle-timeline', 'CmdOrCtrl+Shift+L'),
         act('Print Preview', 'toggle-preview', 'CmdOrCtrl+E'),
         act('Statistics', 'stats', 'CmdOrCtrl+Shift+I'),
+        { type: 'separator' },
+        ed('Next Tab', 'next-tab', 'Ctrl+Tab'),
+        ed('Previous Tab', 'prev-tab', 'Ctrl+Shift+Tab'),
         { type: 'separator' },
         { label: 'Appearance', submenu: [radio('Follow System', 'theme', 'system'), radio('Light', 'theme', 'light'), radio('Dark', 'theme', 'dark')] },
         toggle('Dim Fountain Markup', 'dimMarkup', 'CmdOrCtrl+Shift+M'),
@@ -655,6 +770,7 @@ else {
     const files = fileArgs(argv);
     if (files.length) files.forEach(f => openFile(path.resolve(f)));
     else { const w = focusedWin(); if (w) { if (w.isMinimized()) w.restore(); w.focus(); } else createWindow(); }
+    // (files are opened as tabs in the existing window by openFile)
   });
   app.on('open-file', (e, p) => { e.preventDefault(); if (app.isReady()) openFile(p); else pendingOpen.push(p); });
   const pendingOpen = [];
@@ -662,7 +778,7 @@ else {
     nativeTheme.themeSource = prefs.theme;
     buildMenu();
     const files = [...fileArgs(process.argv), ...pendingOpen];
-    if (files.length) files.forEach(f => createWindow(path.resolve(f)));
+    if (files.length) createWindow(files.map(f => path.resolve(f)));
     else {
       // Reopen the scripts from last time (skipping any that were moved or deleted).
       let last = [];
@@ -670,7 +786,7 @@ else {
         last = (prefs.session || []).filter(p => { try { return fs.statSync(p).isFile(); } catch (e) { return false; } });
         if (!last.length && prefs.recent[0] && fs.existsSync(prefs.recent[0])) last = [prefs.recent[0]];
       }
-      if (last.length) last.forEach(p => createWindow(p));
+      if (last.length) createWindow(last, { activePath: prefs.sessionActive });
       else createWindow();
     }
     // sample / help docs handled in renderer via 'command'
@@ -679,8 +795,11 @@ else {
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 }
 
-// Open sample/help as new untitled documents
-ipcMain.on('open-text-doc', (e, { text }) => createWindow(null, text));
+// Open sample/help as new untitled tabs
+ipcMain.on('open-text-doc', (e, { text, name }) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (win && docs.has(win.id)) newTab(win, text, name); else createWindow([], { text, name });
+});
 
 /* ---------------- Automated test hook (only when OFFBEAT_TEST is set) ---------------- */
 if (process.env.OFFBEAT_TEST) {
@@ -688,7 +807,7 @@ if (process.env.OFFBEAT_TEST) {
     setTimeout(async () => {
       const win = BrowserWindow.getAllWindows()[0];
       const steps = require(path.resolve(process.env.OFFBEAT_TEST));
-      try { await steps({ win, BrowserWindow, askRenderer, saveDoc, loadInto, docs, exportPDFTo: async (file) => {
+      try { await steps({ win, BrowserWindow, askRenderer, saveDoc, loadInto, docs, newTab, closeTab, createWindow, openFile, prefs: () => prefs, exportPDFTo: async (file) => {
         const payload = await askRenderer(win, 'request-print-html');
         const w = await renderInHiddenWindow(payload);
         const data = await w.webContents.printToPDF({ preferCSSPageSize: true, printBackground: true, margins: { marginType: 'none' } });

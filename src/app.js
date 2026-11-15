@@ -12,12 +12,20 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
 
   const App = window.App = {
     cm: null, parsed: null, paginated: null, prefs: null,
-    path: null, name: 'Untitled', settingsRaw: null,
-    cleanGen: 0, parseGen: -1, paginateGen: -1,
-    listeners: { parse: [], paginate: [], cursor: [], prefs: [] },
-    on(ev, fn) { this.listeners[ev].push(fn); },
-    emit(ev, d) { for (const fn of this.listeners[ev]) { try { fn(d); } catch (e) { console.error(e); } } }
+    parseGen: -1, paginateGen: -1,
+    tabs: [], active: null,   // open scripts; each tab has its own CodeMirror document
+    listeners: { parse: [], paginate: [], cursor: [], prefs: [], beforetabswitch: [], tabswitch: [] },
+    on(ev, fn) { (this.listeners[ev] = this.listeners[ev] || []).push(fn); },
+    emit(ev, d) { for (const fn of this.listeners[ev] || []) { try { fn(d); } catch (e) { console.error(e); } } }
   };
+  // The script that's showing: these read and write the active tab.
+  const TAB_DEFAULTS = { path: null, name: 'Untitled', settingsRaw: null, cleanGen: 0 };
+  for (const k of Object.keys(TAB_DEFAULTS)) {
+    Object.defineProperty(App, k, {
+      get() { return App.active ? App.active[k] : TAB_DEFAULTS[k]; },
+      set(v) { if (App.active) App.active[k] = v; }
+    });
+  }
 
   /* ---------------- CodeMirror ---------------- */
   const cm = App.cm = CodeMirror(document.getElementById('editor'), {
@@ -231,15 +239,15 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   }
   App.updateStatus = updateStatus;
 
-  /* ---------------- Dirty tracking ---------------- */
-  let lastDirty = false;
-  function updateDirty() {
-    const dirty = !cm.isClean(App.cleanGen);
-    if (dirty !== lastDirty) {
-      lastDirty = dirty;
-      host.setDirty(dirty);
+  /* ---------------- Dirty tracking (per tab) ---------------- */
+  function updateDirty(tab, forceUI) {
+    tab = tab || App.active; if (!tab) return;
+    const dirty = !tab.doc.isClean(tab.cleanGen);
+    const changed = dirty !== tab.lastDirty;
+    if (changed) { tab.lastDirty = dirty; host.setDirty(dirty, tab.id); App.renderTabs(); }
+    if (tab === App.active && (changed || forceUI)) {
       document.getElementById('doc-name').classList.toggle('dirty', dirty);
-      document.getElementById('st-saved').textContent = dirty ? 'Edited' : (App.path ? 'Saved' : '');
+      document.getElementById('st-saved').textContent = dirty ? 'Edited' : (tab.path ? 'Saved' : '');
     }
   }
 
@@ -486,8 +494,10 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     'zoom-in': () => setZoom((App.prefs.zoom || 1) + 0.1),
     'zoom-out': () => setZoom((App.prefs.zoom || 1) - 0.1),
     'zoom-reset': () => setZoom(1),
-    'sample': () => host.openTextDoc(window.Samples.sample),
-    'help': () => host.openTextDoc(window.Samples.help)
+    'sample': () => host.openTextDoc(window.Samples.sample, 'Sample Screenplay'),
+    'help': () => host.openTextDoc(window.Samples.help, 'Fountain Guide'),
+    'next-tab': () => cycleTab(1),
+    'prev-tab': () => cycleTab(-1)
   };
   App.commands = commands;
 
@@ -562,7 +572,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   let prevPrint = '', prevAutosave = null;
   function applyPrefs() {
     const p = App.prefs;
-    if (p.autosave && prevAutosave === false) scheduleAutosave(500);   // just switched on: save what's waiting
+    if (p.autosave && prevAutosave === false) App.tabs.forEach(t => scheduleAutosave(500, t));   // just switched on: save what's waiting
     prevAutosave = !!p.autosave;
     applyFont(p.editorFont);
     document.documentElement.style.setProperty('--zoom', p.zoom || 1);
@@ -575,29 +585,175 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     App.emit('prefs', p);
   }
 
-  /* ---------------- Load / save ---------------- */
-  function setDocument(text, path, name, pos) {
+  /* ---------------- Tabs: one CodeMirror document per open script ---------------- */
+  // Beat keeps a settings block at the end of the file; it's hidden while editing and put back on save.
+  function makeDoc(text) {
     const s = F.splitSettings(text || '');
-    App.settingsRaw = s.raw || null;
-    let body = s.raw ? s.body.replace(/\s+$/, '\n') : s.body;
-    App.path = path; App.name = name || 'Untitled';
-    document.getElementById('doc-name').textContent = App.name;
-    document.getElementById('doc-name').title = path || '';
-    cm.setValue(body.replace(/\r\n?/g, '\n'));
-    cm.clearHistory();
-    App.cleanGen = cm.changeGeneration(true);
-    lastDirty = true; updateDirty();
-    sceneSig = ''; gapSig = '';
-    App.parseGen = -1;
+    const body = (s.raw ? s.body.replace(/\s+$/, '\n') : s.body).replace(/\r\n?/g, '\n');
+    return { doc: CodeMirror.Doc(body, 'fountain'), settingsRaw: s.raw || null };
+  }
+  function fillTab(tab, text, path, name) {
+    const { doc, settingsRaw } = makeDoc(text);
+    Object.assign(tab, { doc, settingsRaw, path: path || null, name: name || 'Untitled', savedGen: null, lastDirty: undefined, marks: null, pendingPos: null, ignored: new Set() });
+    tab.cleanGen = doc.changeGeneration(true);
+    return tab;
+  }
+  let localSeq = 0;
+  function createTab(id, text, path, name) {
+    const tab = fillTab({ id, autoTimer: null }, text, path, name);
+    App.tabs.push(tab);
+    return tab;
+  }
+  const byId = (id) => App.tabs.find(t => t.id === id) || null;
+  App.tabById = byId;
+
+  function activate(tab, opts) {
+    if (!tab) return;
+    opts = opts || {};
+    const prev = App.active;
+    if (prev === tab && !opts.force) return;
+    if (prev && prev !== tab) {
+      App.emit('beforetabswitch', prev);
+      prev.marks = { sceneMarks, sceneSig, gapWidgets, gapSig };
+      if (pendingRestore && pendingRestore.tab === prev) { prev.pendingPos = pendingRestore.pos; pendingRestore = null; }
+      if (App.tabs.includes(prev)) scheduleAutosave(0, prev);   // leaving a script saves it
+    }
+    App.active = tab;
+    if (cm.getDoc() !== tab.doc) cm.swapDoc(tab.doc);
+    ({ sceneMarks, sceneSig, gapWidgets, gapSig } = tab.marks || { sceneMarks: [], sceneSig: '', gapWidgets: [], gapSig: '' });
+    App.capsLine = null; App.parseGen = -1; App.paginateGen = -1; App._forcePaginate = true;
+    const nameEl = document.getElementById('doc-name');
+    nameEl.textContent = tab.name; nameEl.title = tab.path || '';
     App.ensureParsed();
     App.emit('parse', App.parsed);
     updateSceneNumbers();
     App.paginate();
+    updateDirty(tab, true);
+    if (tab.pendingPos) { const p = tab.pendingPos; tab.pendingPos = null; restorePosition(p); }
+    if (host.tabActivated && typeof tab.id === 'number') host.tabActivated(tab.id);
+    renderTabs();
+    App.emit('tabswitch', tab);
+    updateStatus();
+    if (!opts.noFocus) cm.focus();
+  }
+  App.activateTab = (id) => activate(byId(id));
+
+  function openTab(id, text, path, name, pos) {
+    const tab = createTab(id, text, path, name);
+    activate(tab);
+    cm.setCursor({ line: 0, ch: 0 });
+    if (pos && pos.line < cm.lineCount()) restorePosition(pos);
+    return tab;
+  }
+
+  function removeTab(id) {
+    const tab = byId(id); if (!tab) return;
+    clearTimeout(tab.autoTimer);
+    const i = App.tabs.indexOf(tab);
+    App.tabs.splice(i, 1);
+    if (App.active === tab) {
+      App.active = null;
+      const next = App.tabs[i] || App.tabs[i - 1];
+      if (next) activate(next);
+    }
+    renderTabs();
+  }
+
+  /* Load text into the script that's showing (replacing it). Opens a first tab if there is none. */
+  function setDocument(text, path, name, pos) {
+    let tab = App.active;
+    if (!tab) tab = createTab('local' + (++localSeq), text, path, name);
+    else fillTab(tab, text, path, name);
+    if (host.tabInfo && typeof tab.id === 'number') host.tabInfo(tab.id, { path: tab.path, name: tab.name });
+    activate(tab, { force: true });
     cm.setCursor({ line: 0, ch: 0 });
     if (pos && pos.line < cm.lineCount()) restorePosition(pos);
     cm.focus();
   }
   App.setDocument = setDocument;
+
+  /* ---------------- Tab bar ---------------- */
+  const tabBar = document.getElementById('tabbar');
+  const escT = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const shortName = (t) => (t.name || 'Untitled').replace(/\.(fountain|spmd|txt)$/i, '');
+  function renderTabs() {
+    if (!tabBar) return;
+    const show = App.tabs.length > 1;
+    if (tabBar.hidden === show) { tabBar.hidden = !show; requestAnimationFrame(() => App.layout()); }
+    if (!show) return;
+    const html = App.tabs.map(t => {
+      const on = t === App.active;
+      return `<div class="tab${on ? ' active' : ''}${t.lastDirty ? ' dirty' : ''}" role="tab" aria-selected="${on}" tabindex="${on ? 0 : -1}" draggable="true" data-tab="${t.id}" title="${escT(t.path || t.name)}">` +
+        `<span class="tab-name">${escT(shortName(t))}</span>` +
+        `<button class="tab-close" data-close="${t.id}" tabindex="-1" aria-label="Close ${escT(shortName(t))}" title="Close (Ctrl+W)"></button></div>`;
+    }).join('') + `<button class="tab-new" title="New script (Ctrl+N)" aria-label="New script"></button>`;
+    if (tabBar._html !== html) { tabBar.innerHTML = html; tabBar._html = html; }
+    const a = tabBar.querySelector('.tab.active'); if (a) a.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  App.renderTabs = renderTabs;
+  const closeTab = (id) => host.action('close-tab:' + id);   // the window asks about unsaved changes
+  if (tabBar) {
+    tabBar.addEventListener('click', (e) => {
+      const c = e.target.closest('[data-close]'); if (c) { e.stopPropagation(); closeTab(+c.dataset.close); return; }
+      if (e.target.closest('.tab-new')) { host.action('new'); return; }
+      const t = e.target.closest('.tab'); if (t) activate(byId(+t.dataset.tab));
+    });
+    tabBar.addEventListener('mousedown', (e) => { if (e.button === 1) e.preventDefault(); });   // no autoscroll
+    tabBar.addEventListener('auxclick', (e) => { const t = e.target.closest('.tab'); if (t && e.button === 1) closeTab(+t.dataset.tab); });
+    tabBar.addEventListener('contextmenu', (e) => {
+      const t = e.target.closest('.tab'); if (!t) return;
+      e.preventDefault();
+      const id = +t.dataset.tab;
+      const pop = document.getElementById('popover');
+      pop.innerHTML = `<button data-act="close">Close</button>` + (App.tabs.length > 1 ? `<button data-act="others">Close Others</button>` : '');
+      pop.hidden = false;
+      const r = pop.getBoundingClientRect();
+      pop.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + 'px';
+      pop.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + 'px';
+      pop.onclick = (ev) => {
+        const b = ev.target.closest('button'); if (!b) return;
+        pop.hidden = true;
+        if (b.dataset.act === 'close') closeTab(id); else host.action('close-others:' + id);
+      };
+    });
+    // drag a tab to reorder
+    let dragId = null;
+    tabBar.addEventListener('dragstart', (e) => { const t = e.target.closest('.tab'); if (!t) return; dragId = +t.dataset.tab; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(dragId)); t.classList.add('dragging'); });
+    tabBar.addEventListener('dragend', () => { dragId = null; tabBar.querySelectorAll('.dragging,.drop-before,.drop-after').forEach(x => x.classList.remove('dragging', 'drop-before', 'drop-after')); });
+    tabBar.addEventListener('dragover', (e) => {
+      const t = e.target.closest('.tab'); if (!t || dragId === null) return;
+      e.preventDefault();
+      const r = t.getBoundingClientRect(), after = e.clientX > r.left + r.width / 2;
+      tabBar.querySelectorAll('.drop-before,.drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+      t.classList.add(after ? 'drop-after' : 'drop-before');
+    });
+    tabBar.addEventListener('drop', (e) => {
+      const t = e.target.closest('.tab'); if (!t || dragId === null) return;
+      e.preventDefault();
+      const moving = byId(dragId), target = byId(+t.dataset.tab);
+      if (!moving || !target || moving === target) return;
+      const after = t.classList.contains('drop-after');
+      App.tabs.splice(App.tabs.indexOf(moving), 1);
+      App.tabs.splice(App.tabs.indexOf(target) + (after ? 1 : 0), 0, moving);
+      tabBar._html = null; renderTabs();
+      if (host.tabsOrder) host.tabsOrder(App.tabs.map(x => x.id).filter(x => typeof x === 'number'));
+    });
+  }
+  function cycleTab(dir) {
+    if (App.tabs.length < 2) return;
+    const i = App.tabs.indexOf(App.active);
+    activate(App.tabs[(i + dir + App.tabs.length) % App.tabs.length]);
+  }
+  App.cycleTab = cycleTab;
+  // Ctrl+Tab / Ctrl+Shift+Tab and Ctrl+PageDown / Ctrl+PageUp switch scripts.
+  document.addEventListener('keydown', (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    if (e.key === 'Tab' || e.key === 'PageDown' || e.key === 'PageUp') {
+      if (!document.getElementById('modal-backdrop').hidden) return;
+      e.preventDefault(); e.stopPropagation();
+      cycleTab(e.key === 'PageUp' || (e.key === 'Tab' && e.shiftKey) ? -1 : 1);
+    }
+  }, true);
 
   /* Reopen each script where you left off: same cursor, same spot on screen. */
   // Fonts and the interface size can still be settling when a script opens, which moves the
@@ -606,6 +762,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   function applyRestore() {
     if (!pendingRestore) return;
     if (Date.now() > pendingRestore.until) { pendingRestore = null; return; }
+    if (pendingRestore.tab !== App.active) return;
     const { line, offset } = pendingRestore;
     const top = cm.charCoords({ line, ch: 0 }, 'local').top;
     cm.scrollTo(null, Math.max(0, top - offset));
@@ -614,7 +771,7 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   function restorePosition(pos) {
     const line = Math.min(pos.line, cm.lastLine());
     cm.setCursor({ line, ch: Math.min(pos.ch || 0, cm.getLine(line).length) });
-    pendingRestore = { line, offset: pos.offset != null ? pos.offset : 120, until: Date.now() + 2500 };
+    pendingRestore = { tab: App.active, pos, line, offset: pos.offset != null ? pos.offset : 120, until: Date.now() + 2500 };
     requestAnimationFrame(applyRestore);
     Promise.resolve(fontReady).then(() => requestAnimationFrame(() => requestAnimationFrame(applyRestore)));
   }
@@ -626,21 +783,22 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
   function reportPosition() {
     clearTimeout(posTimer);
     posTimer = setTimeout(() => {
-      if (!App.path || !host.sendPosition) return;
+      if (!App.active || !App.path || !host.sendPosition) return;
       const c = cm.getCursor();
       const top = cm.charCoords({ line: c.line, ch: 0 }, 'local').top;
       const offset = Math.round(top - cm.getScrollInfo().top);
-      host.sendPosition({ line: c.line, ch: c.ch, offset: Math.max(0, Math.min(offset, cm.getScrollInfo().clientHeight - 40)) });
+      host.sendPosition({ line: c.line, ch: c.ch, offset: Math.max(0, Math.min(offset, cm.getScrollInfo().clientHeight - 40)) }, App.active.id);
     }, 400);
   }
   cm.on('cursorActivity', reportPosition);
   cm.on('scroll', reportPosition);
 
-  App.getText = function () {
-    let t = cm.getValue();
-    if (App.settingsRaw) t = t.replace(/\s+$/, '') + '\n\n' + App.settingsRaw;
+  function getTextFor(tab) {
+    let t = tab.doc.getValue();
+    if (tab.settingsRaw) t = t.replace(/\s+$/, '') + '\n\n' + tab.settingsRaw;
     return t;
-  };
+  }
+  App.getText = function () { return App.active ? getTextFor(App.active) : cm.getValue(); };
 
   App.suggestedName = function () {
     const p = App.ensureParsed();
@@ -648,33 +806,59 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     return t ? F.plainInline(t.value.split('\n')[0]).replace(/[\\/:*?"<>|]/g, '').trim() || 'Untitled' : (App.name || 'Untitled').replace(/\.[^.]+$/, '');
   };
 
-  host.on('load', ({ text, path, name, pos }) => setDocument(text, path, name, pos));
-  host.on('import-fdx', ({ xml, name }) => {
+  function loadIntoTab(tabId, text, path, name, pos, replace) {
+    const existing = tabId != null ? byId(tabId) : null;
+    if (existing || replace || tabId == null) {
+      if (existing) activate(existing, { noFocus: true });
+      setDocument(text, path, name, pos);
+      if (tabId != null && App.active && App.active.id !== tabId) App.active.id = tabId;
+    } else openTab(tabId, text, path, name, pos);
+  }
+  host.on('load', ({ tabId, text, path, name, pos, replace }) => loadIntoTab(tabId, text, path, name, pos, replace));
+  host.on('import-fdx', ({ tabId, xml, name, replace }) => {
     try {
       const text = FDX.fromFDX(xml);
-      setDocument(text, null, name + ' (imported)');
-      App.cleanGen = -1; lastDirty = false; updateDirty();
+      loadIntoTab(tabId, text, null, name + ' (imported)', null, replace);
+      App.active.cleanGen = -1; App.active.lastDirty = undefined; updateDirty(App.active, true);
       toast('Imported from Final Draft — save to keep it as Fountain');
     } catch (e) { toast('Could not import this Final Draft file'); console.error(e); }
   });
-  host.on('saved', ({ path, name, auto }) => {
-    App.path = path; App.name = name;
-    document.getElementById('doc-name').textContent = name;
-    document.getElementById('doc-name').title = path;
+  host.on('activate-tab', ({ tabId }) => activate(byId(tabId)));
+  host.on('remove-tab', ({ tabId }) => removeTab(tabId));
+  host.on('saved', ({ tabId, path, name, auto }) => {
+    const tab = (tabId != null && byId(tabId)) || App.active; if (!tab) return;
+    tab.path = path; tab.name = name;
+    if (tab === App.active) {
+      document.getElementById('doc-name').textContent = name;
+      document.getElementById('doc-name').title = path;
+    }
     // Clean as of the text that was written; anything typed during the save stays unsaved.
-    App.cleanGen = savedGen != null ? savedGen : cm.changeGeneration(true);
-    savedGen = null;
-    lastDirty = undefined; updateDirty();   // always re-report, so the window knows about later edits
-    const st = document.getElementById('st-saved');
-    if (cm.isClean(App.cleanGen)) st.textContent = auto ? 'Autosaved' : 'Saved';
-    else scheduleAutosave(1500);
+    tab.cleanGen = tab.savedGen != null ? tab.savedGen : tab.doc.changeGeneration(true);
+    tab.savedGen = null;
+    tab.lastDirty = undefined; updateDirty(tab, true);   // always re-report, so the window knows about later edits
+    tabBar && (tabBar._html = null); renderTabs();
+    if (tab.doc.isClean(tab.cleanGen)) { if (tab === App.active) document.getElementById('st-saved').textContent = auto ? 'Autosaved' : 'Saved'; }
+    else scheduleAutosave(1500, tab);
   });
   host.on('prefs', (p) => { App.prefs = p; applyPrefs(); });
   host.on('command', (c) => cmd(c));
-  let savedGen = null;
-  host.on('request-text', ({ id }) => { savedGen = cm.changeGeneration(true); host.reply(id, App.getText()); });
-  host.on('request-is-empty', ({ id }) => host.reply(id, cm.getValue().trim() === '' && cm.isClean(App.cleanGen)));
-  host.on('request-suggested-name', ({ id }) => host.reply(id, App.suggestedName()));
+  const tabFor = (payload) => (payload && payload.tabId != null && byId(payload.tabId)) || App.active;
+  host.on('request-text', ({ id, payload }) => {
+    const tab = tabFor(payload);
+    if (!tab) return host.reply(id, cm.getValue());
+    tab.savedGen = tab.doc.changeGeneration(true);
+    host.reply(id, getTextFor(tab));
+  });
+  host.on('request-is-empty', ({ id, payload }) => {
+    const tab = tabFor(payload);
+    host.reply(id, !!tab && !tab.path && tab.doc.getValue().trim() === '' && tab.doc.isClean(tab.cleanGen));
+  });
+  host.on('request-suggested-name', ({ id, payload }) => {
+    const tab = tabFor(payload);
+    if (!tab || tab === App.active) return host.reply(id, App.suggestedName());
+    const t = F.parse(tab.doc.getValue()).title.find(f => f.key.toLowerCase() === 'title');
+    host.reply(id, t ? F.plainInline(t.value.split('\n')[0]).replace(/[\\/:*?"<>|]/g, '').trim() || 'Untitled' : (tab.name || 'Untitled').replace(/\.[^.]+$/, ''));
+  });
   host.on('request-print-html', async ({ id }) => {
     App.ensureParsed();
     const res = P.paginate(App.parsed, App.prefs.print);
@@ -694,16 +878,19 @@ window.addEventListener('error', (e) => window.__errs.push(String(e.message) + '
     }
   });
 
-  // Autosave: shortly after you stop typing, when you switch to another app, and every 30 s as a safety net.
-  let autoTimer = null;
-  function scheduleAutosave(delay) {
-    clearTimeout(autoTimer);
-    if (!App.prefs || !App.prefs.autosave || !App.path) return;
-    autoTimer = setTimeout(() => { if (!cm.isClean(App.cleanGen)) host.autosave(); }, delay);
+  // Autosave (per tab): shortly after you stop typing, when you switch tabs or apps, and every 30 s as a safety net.
+  function scheduleAutosave(delay, tab) {
+    tab = tab || App.active; if (!tab) return;
+    clearTimeout(tab.autoTimer);
+    if (!App.prefs || !App.prefs.autosave || !tab.path) return;
+    tab.autoTimer = setTimeout(() => {
+      if (App.tabs.includes(tab) && !tab.doc.isClean(tab.cleanGen)) host.autosave(tab.id);
+    }, delay);
   }
+  const autosaveAll = () => App.tabs.forEach(t => scheduleAutosave(0, t));
   cm.on('changes', () => scheduleAutosave(2500));
-  window.addEventListener('blur', () => scheduleAutosave(0));
-  setInterval(() => scheduleAutosave(0), 30000);
+  window.addEventListener('blur', autosaveAll);
+  setInterval(autosaveAll, 30000);
 
   // Toolbar
   document.getElementById('toolbar').addEventListener('click', (e) => {

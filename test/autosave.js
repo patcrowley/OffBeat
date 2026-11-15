@@ -42,6 +42,7 @@ module.exports = async ({ win, loadInto, docs, saveDoc }) => {
   check('untitled scripts are left alone, no errors', errs.length === 0, errs);
 
   // Close with an unsaved edit: should save and close without asking.
+  await js(`App.setDocument('', null, 'Untitled')`); await sleep(200);   // leave no unsaved untitled script behind
   await loadInto(win, file); await sleep(600);
   await type('ON CLOSE\n\n');
   console.log(fails ? `AUTOSAVE: ${fails} failures (before close)` : 'AUTOSAVE: all passed (before close)');

@@ -4,7 +4,7 @@ A Windows screenwriting app in the spirit of [Beat](https://github.com/lmparppei
 
 Offbeat is an independent, from-scratch implementation (Electron + CodeMirror); it is not affiliated with Beat or its author.
 
-![The Offbeat editor: a screenplay formatted on a true-to-scale page, with the scene outline in the sidebar](docs/screenshots/editor.png)
+![The Offbeat editor: a screenplay formatted on a true-to-scale page, with tabs for two open scripts and the scene outline in the sidebar](docs/screenshots/editor.png)
 
 ## Install (Windows 10/11, 64-bit)
 
@@ -18,6 +18,7 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 ## What's in it
 
 **Writing**
+- **Tabs**: open several scripts in one window. New Script (Ctrl+N) and Open add a tab, and double-clicking a `.fountain` file adds it to the window you have open. Each tab keeps its own undo history, cursor and scroll position. Switch with Ctrl+Tab / Ctrl+Shift+Tab, drag tabs to reorder, middle-click or Ctrl+W to close, right-click for Close Others. The tab bar appears once a second script is open
 - Live screenplay formatting on a true-to-scale page: scene headings, action, character cues, parentheticals, dialogue, transitions, centered text, lyrics, dual dialogue
 - Scene numbers in both margins, page breaks shown as real gaps between sheets
 - Auto-capitalized scene headings; **Tab** on an empty line starts a character cue, **Tab** under a cue adds a parenthetical
@@ -29,7 +30,7 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 - Light/dark mode (or follow Windows), dim markup, typewriter scrolling, script zoom
 - **Interface size** (View → Interface Size, 75%–200%) makes everything bigger or smaller: menus, sidebar, dialogs and the script. In a narrow window the script keeps the size you chose and wraps lines a little earlier, instead of shrinking. PDFs and printouts are never affected
 - **Editor fonts** (View → Editor Font): Courier Prime, Courier New, IBM Plex Mono, Atkinson Hyperlegible Mono (designed for low vision) and OpenDyslexic (designed for dyslexia). This only changes how the script looks while you write
-- **Reopens your last script** where you left off, with the same cursor position (Settings → Reopen Last Script on Startup)
+- **Reopens your last scripts** where you left off, all of the tabs, each at the same cursor position (Settings → Reopen Last Script on Startup)
 - **Autosave** (on by default, File → Autosave): saves a couple of seconds after you stop typing, when you switch to another app, and when you close, without asking. It works once a script has been saved to a file. Backups of saved versions are kept too (File → Show Backups Folder); autosaves add one at most every 10 minutes
 
 | Spell check review (F7) | 150% interface size with Atkinson Hyperlegible Mono |
@@ -63,7 +64,9 @@ The app isn't code-signed, so the first launch may show **Windows protected your
 
 | Action | Shortcut |
 | --- | --- |
-| New / Open / Save / Save As | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S |
+| New script (tab) / Open / Save / Save As | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S |
+| Next / previous tab | Ctrl+Tab / Ctrl+Shift+Tab |
+| Close tab / close window | Ctrl+W / Ctrl+Shift+W |
 | Export PDF / Print | Ctrl+Shift+E / Ctrl+P |
 | Print preview | Ctrl+E |
 | Outline / Index cards / Timeline | Ctrl+Shift+O / Ctrl+Shift+K / Ctrl+Shift+L |
